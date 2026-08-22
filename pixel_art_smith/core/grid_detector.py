@@ -32,7 +32,7 @@ class GridDetector:
         if candidates:
             candidates.sort(key=lambda c: c[1], reverse=True)
             for p, _score in candidates:
-                if p == 8 or p == 4:
+                if p in (8, 4):
                     return p
             return int(candidates[0][0])
 
@@ -42,46 +42,48 @@ class GridDetector:
     def core_subblock_downsample(
         img: Image.Image, pitch: int = 8, margin: int = 1, alpha_threshold: float = 0.25
     ) -> Image.Image:
-        """Downsample image by sampling the pure core sub-region of each PxP block.
+        """Downsample image by sampling the pure center core of each PxP block.
 
-        Sampling the inner (P - 2*margin) sub-region avoids boundary anti-aliasing
-        and eliminates color bleeding between adjacent blocks.
+        Samples the inner sub-block of each pixel cell to eliminate edge blur and color bleeding.
+        Preserves all RGB channels intact.
         """
         if pitch <= 1:
             return img.copy()
 
-        arr = np.array(img.convert("RGBA"))
-        h, w, _ = arr.shape
+        has_alpha = img.mode == "RGBA"
+        arr = np.array(img.convert("RGBA" if has_alpha else "RGB"))
+        h, w = arr.shape[:2]
 
         target_w = max(1, w // pitch)
         target_h = max(1, h // pitch)
 
-        mode_arr = np.zeros((target_h, target_w, 4), dtype=np.uint8)
-
-        for y in range(target_h):
-            y_start = y * pitch + margin
-            y_end = max(y_start + 1, (y + 1) * pitch - margin)
-            for x in range(target_w):
-                x_start = x * pitch + margin
-                x_end = max(x_start + 1, (x + 1) * pitch - margin)
-
-                block = arr[y_start:y_end, x_start:x_end]
-                if block.size == 0:
-                    continue
-
-                opaque_mask = block[:, :, 3] > 0
-                opaque_count = np.sum(opaque_mask)
-
-                if opaque_count >= max(1, (block.shape[0] * block.shape[1]) * alpha_threshold):
-                    fg_pixels = block[opaque_mask]
-                    # Compute mean color of the clean core sub-block
-                    mean_color = fg_pixels.mean(axis=0).astype(np.uint8)
-                    mode_arr[y, x] = mean_color
-                    mode_arr[y, x, 3] = 255
-                else:
-                    mode_arr[y, x] = [0, 0, 0, 0]
-
-        return Image.fromarray(mode_arr, "RGBA")
+        if has_alpha:
+            mode_arr = np.zeros((target_h, target_w, 4), dtype=np.uint8)
+            for y in range(target_h):
+                cy = y * pitch + pitch // 2
+                for x in range(target_w):
+                    cx = x * pitch + pitch // 2
+                    block = arr[max(0, cy - 1) : min(h, cy + 1), max(0, cx - 1) : min(w, cx + 1)]
+                    if block.size == 0:
+                        continue
+                    opaque_mask = block[:, :, 3] > 0
+                    if np.sum(opaque_mask) >= max(1, block.shape[0] * block.shape[1] * alpha_threshold):
+                        fg = block[opaque_mask]
+                        mode_arr[y, x, :3] = fg[:, :3].mean(axis=0).astype(np.uint8)
+                        mode_arr[y, x, 3] = 255
+                    else:
+                        mode_arr[y, x] = [0, 0, 0, 0]
+            return Image.fromarray(mode_arr, "RGBA")
+        else:
+            mode_arr = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            for y in range(target_h):
+                cy = y * pitch + pitch // 2
+                for x in range(target_w):
+                    cx = x * pitch + pitch // 2
+                    block = arr[max(0, cy - 1) : min(h, cy + 1), max(0, cx - 1) : min(w, cx + 1)]
+                    if block.size > 0:
+                        mode_arr[y, x] = block.mean(axis=(0, 1)).astype(np.uint8)
+            return Image.fromarray(mode_arr, "RGB")
 
     @staticmethod
     def upscale_nearest(img: Image.Image, scale: int = 1) -> Image.Image:

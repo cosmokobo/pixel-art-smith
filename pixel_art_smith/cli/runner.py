@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Headless CLI Runner for PixelArtSmith with Grid Modes, Core Sampling & Semantic Quantization."""
+"""Headless CLI Runner for PixelArtSmith with Snapper-Parity Sampling & Semantic Quantization."""
 
 import argparse
 import json
@@ -36,87 +36,75 @@ def process_single_image(
     cell_size: tuple[int, int] | None = None,
     grid_mode: str = "auto-fit",
     scale: int = 4,
-    palette_name: str = "snapper-13",
-    max_colors: int = 13,
+    palette_name: str = "snapper-16",
+    max_colors: int = 16,
     remove_bg: bool = True,
     clean_orphans: bool = True,
     export_frames: bool = False,
-    bg_remover: BackgroundRemover | None = None,
     expected_rows: int = 4,
     expected_cols: int = 4,
 ) -> dict:
-    """Execute full True-Grid post-processing pipeline on a sprite sheet with Semantic Palette Quantization."""
+    """Execute Snapper-Parity True-Grid post-processing pipeline on a sprite sheet."""
     print(f"\n[INFO] Processing: {input_path.name}")
-    raw_img = Image.open(input_path).convert("RGBA")
+    raw_img = Image.open(input_path).convert("RGB")
 
-    # 1. Background removal
-    if remove_bg:
-        print("  [1/5] Removing background with FloodFill & defringing...")
-        if bg_remover is None:
-            bg_remover = BackgroundRemover()
-        clean_bg_img = bg_remover.remove_background(raw_img, alpha_threshold=128, defringe=True, method="auto")
-    else:
-        print("  [1/5] Skipping background removal (using existing alpha)...")
-        clean_bg_img = PixelCleaner.cleanup_transparency_halos(raw_img)
-
-    # 2. Pitch Detection & Core Sub-Block Sampling (Zero-Bleed)
+    # 1. Pitch Detection & Core Center-Subblock Sampling (Zero-Bleed, Preserves Full RGB)
     if pitch is None or pitch <= 0:
-        detected_pitch = GridDetector.estimate_pixel_pitch(clean_bg_img)
-        print(f"  [2/5] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
+        detected_pitch = GridDetector.estimate_pixel_pitch(raw_img)
+        print(f"  [1/4] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
     else:
         detected_pitch = pitch
-        print(f"  [2/5] Using configured pixel block pitch: {detected_pitch}px")
+        print(f"  [1/4] Using configured pixel block pitch: {detected_pitch}px")
 
-    margin = 1 if detected_pitch >= 6 else 0
+    grid_img = GridDetector.core_subblock_downsample(raw_img, pitch=detected_pitch)
+    print(f"        Sampled Core Grid: {raw_img.width}x{raw_img.height} -> {grid_img.width}x{grid_img.height}")
+
+    # 2. Semantic Palette Quantization (KMeans / Palette Mapping matching Snapper)
     print(
-        f"        Sampling Core Sub-Block ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch}, Margin: {margin}px)..."
-    )
-    grid_img = GridDetector.core_subblock_downsample(clean_bg_img, pitch=detected_pitch, margin=margin)
-
-    # 3. Clean orphan pixels & Semantic Palette Quantization
-    if clean_orphans:
-        grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
-
-    print(
-        f"  [3/5] Applying Chroma-Weighted Semantic Quantization (Palette: '{palette_name}', Max Colors: {max_colors})..."
+        f"  [2/4] Applying Chroma-Weighted Semantic Quantization (Palette: '{palette_name}', Max Colors: {max_colors})..."
     )
     palette_colors: list[str] = []
 
-    if palette_name.startswith("snapper") or palette_name == "default" or palette_name.startswith("adaptive"):
+    if palette_name.startswith("snapper") or palette_name in ("default", "adaptive", "none"):
         n_c = int(palette_name.split("-")[1]) if "-" in palette_name else max_colors
-        grid_img, palette_colors = PixelPosterizer.process_snapper_pipeline(grid_img, max_colors=n_c, w_chroma=2.0)
+        quant_img, palette_colors = PixelPosterizer.process_snapper_pipeline(grid_img, max_colors=n_c, w_chroma=2.0)
     elif palette_name in PALETTES:
         hex_list = PALETTES[palette_name]
-        # Always include black outline if not present
         if "#000000" not in hex_list and "#000000" not in [h.lower() for h in hex_list]:
             hex_list = ["#000000"] + hex_list
         palette_rgb = np.array([hex_to_rgb(h) for h in hex_list], dtype=np.uint8)
-        grid_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
+        quant_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
             grid_img, palette_rgb=palette_rgb, w_chroma=2.0
         )
     else:
-        pass
+        quant_img, palette_colors = PixelPosterizer.process_snapper_pipeline(grid_img, max_colors=max_colors)
 
-    # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames)
-    print("  [4/5] Segmenting 2D motion matrix (Rows=Motions, Cols=Frames)...")
+    # 3. Strict Non-Leaking Background Removal on Quantized Grid
+    if remove_bg:
+        print("  [3/4] Applying zero-leakage 4-connected background removal...")
+        clean_img = BackgroundRemover.remove_background_quantized(quant_img)
+    else:
+        clean_img = quant_img.convert("RGBA")
+
+    if clean_orphans:
+        clean_img = PixelCleaner.remove_orphan_pixels(clean_img)
+
+    # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames) & Packing
+    print("  [4/4] Segmenting & Assembling Matrix Sprite Sheet...")
     isolator = SpriteIsolator(min_area=12, padding=1)
-    matrix = isolator.isolate_matrix(grid_img, expected_rows=expected_rows, expected_cols=expected_cols)
+    matrix = isolator.isolate_matrix(clean_img, expected_rows=expected_rows, expected_cols=expected_cols)
 
     n_rows = len(matrix)
     row_counts = [len(r) for r in matrix]
     total_frames = sum(row_counts)
     print(f"  --> Identified {n_rows} motion row(s) with frames: {row_counts} (Total {total_frames} frames).")
 
-    # Determine standardized cell size using Grid Mode
     if cell_size is not None:
         final_cell_size = cell_size
-        print(f"        Using explicit logical cell size: {final_cell_size[0]}x{final_cell_size[1]}px")
     else:
         final_cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
-        print(f"        Resolved cell size ({grid_mode}): {final_cell_size[0]}x{final_cell_size[1]}px")
+    print(f"        Resolved cell size ({grid_mode}): {final_cell_size[0]}x{final_cell_size[1]}px")
 
-    # 5. Pack Matrix Sprite Sheet & Export
-    print(f"  [5/5] Assembling Matrix Sprite Sheet (Grid Mode: {grid_mode}, Scale: {scale}x)...")
     packed_sheet, metadata, std_grid = SpritePacker.pack_matrix_sheet(
         matrix=matrix,
         cell_size=final_cell_size,
@@ -134,12 +122,11 @@ def process_single_image(
     packed_sheet.save(sheet_path)
     print(f"  [SUCCESS] Output Sprite Sheet: {sheet_path}")
 
-    # Save Agentic AI JSON metadata if requested
+    # Save Agentic AI JSON metadata
     json_path = output_dir / f"{stem}_metadata.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
-    # Save individual motion frames only if explicitly requested
     if export_frames:
         frames_dir = output_dir / f"{stem}_frames"
         frames_dir.mkdir(exist_ok=True)
@@ -187,13 +174,13 @@ def main_cli(args: list[str] | None = None) -> int:
         "-c", "--cell-size", type=str, default=None, help="Explicit cell size 'WxH' or 'N' (overrides --grid-mode)."
     )
     parser.add_argument(
-        "-p", "--palette", type=str, default="snapper-13", help="Palette preset name (default: 'snapper-13')."
+        "-p", "--palette", type=str, default="snapper-16", help="Palette preset name (default: 'snapper-16')."
     )
     parser.add_argument(
-        "-k", "--max-colors", type=int, default=13, help="Max discrete colors per character (default: 13)."
+        "-k", "--max-colors", type=int, default=16, help="Max discrete colors per character (default: 16)."
     )
     parser.add_argument("-s", "--scale", type=int, default=4, help="Integer upscale factor for display (default: 4).")
-    parser.add_argument("--no-bg-remove", action="store_true", help="Skip AI background removal.")
+    parser.add_argument("--no-bg-remove", action="store_true", help="Keep solid background without transparency.")
     parser.add_argument("--no-clean", action="store_true", help="Skip orphan single-pixel cleanup.")
     parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
 
@@ -213,11 +200,7 @@ def main_cli(args: list[str] | None = None) -> int:
     else:
         exts = {".png", ".jpg", ".jpeg", ".webp"}
         image_files = sorted(
-            [
-                p
-                for p in input_path.iterdir()
-                if p.is_file() and p.suffix.lower() in exts and "pixel_sheet" not in p.name
-            ]
+            [p for p in input_path.iterdir() if p.is_file() and p.suffix.lower() in exts and "pixel_sheet" not in p.name]
         )
 
     if not image_files:
@@ -231,8 +214,6 @@ def main_cli(args: list[str] | None = None) -> int:
     )
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
-
-    bg_remover = BackgroundRemover() if not parsed.no_bg_remove else None
 
     success_count = 0
     for img_p in image_files:
@@ -249,7 +230,6 @@ def main_cli(args: list[str] | None = None) -> int:
                 remove_bg=not parsed.no_bg_remove,
                 clean_orphans=not parsed.no_clean,
                 export_frames=parsed.export_frames,
-                bg_remover=bg_remover,
             )
             if res.get("status") == "success":
                 success_count += 1
