@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Sprite Sheet Matrix Packer, Ground Alignment, and Agentic AI Metadata."""
+"""Sprite Sheet Matrix Packer, Ground Alignment, Grid Modes, and Agentic AI Metadata."""
 
 import json
 from typing import List, Tuple, Dict, Any, Optional
@@ -31,7 +31,7 @@ class SpritePacker:
             sprite = sprite.resize((new_w, new_h), resample=Image.Resampling.NEAREST)
             sw, sh = sprite.size
 
-        offset_x = (cell_w - sw) // 2
+        offset_x = max(0, (cell_w - sw) // 2)
         offset_y = max(0, cell_h - sh - bottom_margin)
 
         canvas.paste(sprite, (offset_x, offset_y), sprite)
@@ -56,12 +56,33 @@ class SpritePacker:
         return cell_w, cell_h
 
     @staticmethod
+    def resolve_cell_size(matrix: List[List[FrameItem]], grid_mode: str = "auto-fit") -> Tuple[int, int]:
+        """Resolve cell size based on grid mode ('auto-fit', 'fixed-32', 'fixed-48', 'fixed-64', or 'fixed-WxH')."""
+        mode = grid_mode.lower().strip()
+        if mode in ("auto-fit", "auto", "fit", "none", "0"):
+            return SpritePacker.calculate_optimal_cell_size(matrix)
+        elif mode in ("fixed-32", "32", "32x32"):
+            return 32, 32
+        elif mode in ("fixed-48", "48", "48x48"):
+            return 48, 48
+        elif mode in ("fixed-64", "64", "64x64"):
+            return 64, 64
+        elif "x" in mode:
+            parts = mode.replace("fixed-", "").split("x")
+            try:
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                pass
+        return SpritePacker.calculate_optimal_cell_size(matrix)
+
+    @staticmethod
     def pack_matrix_sheet(
         matrix: List[List[FrameItem]],
         cell_size: Tuple[int, int],
         scale: int = 1,
-        palette_name: str = "endesga-32",
-        palette_colors: Optional[List[str]] = None
+        palette_name: str = "snapper-13",
+        palette_colors: Optional[List[str]] = None,
+        grid_mode: str = "auto-fit"
     ) -> Tuple[Image.Image, Dict[str, Any], List[List[Image.Image]]]:
         """Pack 2D matrix into an M (Rows/Motions) x N (Columns/Frames) Sprite Sheet.
         
@@ -128,6 +149,7 @@ class SpritePacker:
                 "width": sheet_w,
                 "height": sheet_h,
                 "grid_layout": {
+                    "grid_mode": grid_mode,
                     "rows": n_rows,
                     "columns": max_cols,
                     "cell_size": {"width": scaled_w, "height": scaled_h},

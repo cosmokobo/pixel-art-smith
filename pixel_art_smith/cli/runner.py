@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Headless CLI Runner for PixelArtSmith with Core Sub-Block Sampling & Chroma-Weighted Quantization."""
+"""Headless CLI Runner for PixelArtSmith with Grid Modes, Core Sampling & Semantic Quantization."""
 
 import os
 import sys
@@ -36,6 +36,7 @@ def process_single_image(
     output_dir: Path,
     pitch: Optional[int] = None,
     cell_size: Optional[Tuple[int, int]] = None,
+    grid_mode: str = "auto-fit",
     scale: int = 4,
     palette_name: str = "snapper-13",
     max_colors: int = 13,
@@ -112,22 +113,23 @@ def process_single_image(
     total_frames = sum(row_counts)
     print(f"  --> Identified {n_rows} motion row(s) with frames: {row_counts} (Total {total_frames} frames).")
 
-    # Determine standardized cell size
-    if cell_size is None:
-        final_cell_size = SpritePacker.calculate_optimal_cell_size(matrix)
-        print(f"        Auto-calculated logical cell size: {final_cell_size[0]}x{final_cell_size[1]}px")
-    else:
+    # Determine standardized cell size using Grid Mode
+    if cell_size is not None:
         final_cell_size = cell_size
         print(f"        Using explicit logical cell size: {final_cell_size[0]}x{final_cell_size[1]}px")
+    else:
+        final_cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
+        print(f"        Resolved cell size ({grid_mode}): {final_cell_size[0]}x{final_cell_size[1]}px")
 
     # 5. Pack Matrix Sprite Sheet & Export
-    print(f"  [5/5] Assembling Matrix Sprite Sheet (Scale: {scale}x)...")
+    print(f"  [5/5] Assembling Matrix Sprite Sheet (Grid Mode: {grid_mode}, Scale: {scale}x)...")
     packed_sheet, metadata, std_grid = SpritePacker.pack_matrix_sheet(
         matrix=matrix,
         cell_size=final_cell_size,
         scale=scale,
         palette_name=palette_name,
-        palette_colors=palette_colors
+        palette_colors=palette_colors,
+        grid_mode=grid_mode
     )
 
     stem = input_path.stem
@@ -159,7 +161,8 @@ def process_single_image(
         "sheet": str(sheet_path),
         "rows": n_rows,
         "total_frames": total_frames,
-        "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}"
+        "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}",
+        "grid_mode": grid_mode
     }
 
 
@@ -171,7 +174,10 @@ def main_cli(args: Optional[List[str]] = None) -> int:
     parser.add_argument("input", type=str, help="Input image file or directory path.")
     parser.add_argument("-o", "--output-dir", type=str, default="./output", help="Output directory path (default: ./output).")
     parser.add_argument("-P", "--pitch", type=int, default=8, help="Pixel block pitch (default: 8 for 32px retro, 4 for 64px RPG, 0 for auto).")
-    parser.add_argument("-c", "--cell-size", type=str, default="auto", help="Logical cell size WxH (default: auto).")
+    parser.add_argument("-g", "--grid-mode", type=str, default="auto-fit",
+                        choices=["auto-fit", "fixed-32", "fixed-48", "fixed-64"],
+                        help="Grid packaging mode: auto-fit (default), fixed-32 (32x32 standard), fixed-48, fixed-64.")
+    parser.add_argument("-c", "--cell-size", type=str, default="auto", help="Override logical cell size WxH (default: auto).")
     parser.add_argument("-s", "--scale", type=int, default=4, help="Nearest-neighbor integer upscale factor (default: 4).")
     parser.add_argument("-p", "--palette", type=str, default="snapper-13",
                         choices=[
@@ -216,7 +222,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
 
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
-    print(f" Pitch: {parsed.pitch}px | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x")
+    print(f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x")
     print(f" Found {len(files)} image(s) to process.")
     print("========================================================================")
 
@@ -226,6 +232,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
             output_dir=output_dir,
             pitch=parsed.pitch,
             cell_size=cell_size,
+            grid_mode=parsed.grid_mode,
             scale=parsed.scale,
             palette_name=parsed.palette,
             max_colors=parsed.max_colors,
