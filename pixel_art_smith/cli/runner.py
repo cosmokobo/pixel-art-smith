@@ -113,29 +113,27 @@ def process_single_image(
     )
 
     stem = input_path.stem
-    char_out_dir = output_dir / stem
-    char_out_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save packed sheet
-    sheet_path = char_out_dir / f"{stem}_pixel_sheet.png"
+    # Save primary packed sprite sheet (clean 1 file)
+    sheet_path = output_dir / f"{stem}_pixel_sheet.png"
     packed_sheet.save(sheet_path)
-    print(f"  [SUCCESS] Saved Packed Matrix Sheet: {sheet_path}")
+    print(f"  [SUCCESS] Output Sprite Sheet: {sheet_path}")
 
-    # Save Agentic AI JSON metadata
-    json_path = char_out_dir / f"{stem}_metadata.json"
+    # Save Agentic AI JSON metadata if requested
+    json_path = output_dir / f"{stem}_metadata.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
-    print(f"  [SUCCESS] Saved Agentic Metadata: {json_path}")
 
-    # Save individual motion frames if requested
+    # Save individual motion frames only if explicitly requested
     if export_frames:
-        frames_dir = char_out_dir / "frames"
+        frames_dir = output_dir / f"{stem}_frames"
         frames_dir.mkdir(exist_ok=True)
         for r_idx, row in enumerate(std_grid):
             for c_idx, frame_img in enumerate(row):
                 frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
                 frame_img.save(frame_path)
-        print(f"  [SUCCESS] Exported {total_frames} individual motion frames to {frames_dir}/")
+        print(f"  [INFO] Exported individual frames to: {frames_dir}/")
 
     return {
         "status": "success",
@@ -156,7 +154,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
     parser.add_argument("-o", "--output-dir", type=str, default="./output", help="Output directory path (default: ./output).")
     parser.add_argument("-P", "--pitch", type=int, default=0, help="Override native pseudo-pixel pitch (0 = auto-detect).")
     parser.add_argument("-c", "--cell-size", type=str, default="auto", help="Logical cell size WxH (default: auto).")
-    parser.add_argument("-s", "--scale", type=int, default=2, help="Nearest-neighbor integer upscale factor (default: 2).")
+    parser.add_argument("-s", "--scale", type=int, default=4, help="Nearest-neighbor integer upscale factor (default: 4).")
     parser.add_argument("-p", "--palette", type=str, default="endesga-32",
                         choices=list(PALETTES.keys()) + [
                             "adaptive-8", "adaptive-16", "adaptive-24", "adaptive-32", "adaptive-64", "none"
@@ -164,7 +162,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
                         help="Palette preset to snap colors to (default: endesga-32).")
     parser.add_argument("--no-remove-bg", action="store_true", help="Skip AI background removal.")
     parser.add_argument("--no-clean", action="store_true", help="Skip 1-pixel orphan noise cleanup.")
-    parser.add_argument("--no-export-frames", action="store_true", help="Do not save individual frame PNGs.")
+    parser.add_argument("--split-frames", action="store_true", help="Also export individual sliced frame PNG files.")
     parser.add_argument("--model", type=str, default="isnet-general-use", help="Rembg AI model name.")
 
     parsed = parser.parse_args(args)
@@ -180,12 +178,15 @@ def main_cli(args: Optional[List[str]] = None) -> int:
     cell_size = parse_cell_size(parsed.cell_size)
     bg_remover = BackgroundRemover(model_name=parsed.model) if not parsed.no_remove_bg else None
 
-    # Collect images
+    # Collect images (ignore sub-outputs or already processed sheets)
     image_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
     if input_target.is_file():
         files = [input_target]
     else:
-        files = [p for p in input_target.iterdir() if p.is_file() and p.suffix.lower() in image_exts]
+        files = [
+            p for p in input_target.iterdir()
+            if p.is_file() and p.suffix.lower() in image_exts and not p.stem.endswith("_pixel_sheet") and not p.stem.endswith("_true_grid")
+        ]
 
     if not files:
         print(f"[WARN] No supported image files found in {input_target}", file=sys.stderr)
@@ -207,7 +208,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
             palette_name=parsed.palette,
             remove_bg=not parsed.no_remove_bg,
             clean_orphans=not parsed.no_clean,
-            export_frames=not parsed.no_export_frames,
+            export_frames=parsed.split_frames,
             bg_remover=bg_remover
         )
 
