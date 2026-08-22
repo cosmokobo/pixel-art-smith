@@ -8,6 +8,7 @@ from .grid_detector import GridDetector
 from .sprite_isolator import SpriteIsolator, FrameItem
 from .cleaner import PixelCleaner
 from .packer import SpritePacker
+from .posterizer import PixelPosterizer
 
 __all__ = [
     "PALETTES",
@@ -20,4 +21,5 @@ __all__ = [
     "FrameItem",
     "PixelCleaner",
     "SpritePacker",
+    "PixelPosterizer",
 ]

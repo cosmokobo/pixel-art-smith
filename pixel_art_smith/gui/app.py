@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Multi-Palette Support."""
+"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Strict Ramp Consolidation."""
 
 import os
 import sys
@@ -27,6 +27,7 @@ from ..core.sprite_isolator import SpriteIsolator, FrameItem
 from ..core.palette import PaletteQuantizer, PALETTES, hex_to_rgb
 from ..core.cleaner import PixelCleaner
 from ..core.packer import SpritePacker
+from ..core.posterizer import PixelPosterizer
 
 
 class PixelArtSmithApp:
@@ -85,15 +86,27 @@ class PixelArtSmithApp:
             self.btn_open = tk.Button(self.sidebar, text="📁 Open Sprite Image", command=self._on_open_file)
         self.btn_open.pack(padx=15, pady=(0, 12), fill="x")
 
+        # Resolution Preset
+        self._create_label("Resolution / Sprite Size Preset:")
+        res_options = [
+            "Retro Snapper (32x32px - Pitch 8px)",
+            "High-Detail RPG (64x64px - Pitch 4px)",
+            "Medium Console (48x48px - Pitch 6px)"
+        ]
+        self.var_resolution = tk.StringVar(value=res_options[0])
+        if GUI_BACKEND == "customtkinter":
+            self.opt_resolution = ctk.CTkOptionMenu(self.sidebar, values=res_options, variable=self.var_resolution)
+        else:
+            self.opt_resolution = ttk.Combobox(self.sidebar, values=res_options, textvariable=self.var_resolution, state="readonly")
+        self.opt_resolution.pack(padx=15, pady=(0, 8), fill="x")
+
         # Palette Selector
-        self._create_label("Color Palette Preset:")
+        self._create_label("Color Palette & Ramp Mode:")
         palette_options = [
+            "snapper-14 (Clean 14-Color Flat Ramps)",
             "endesga-32 (Fantasy RPG)",
-            "endesga-64 (Rich RPG)",
-            "dawnbringer-32 (Classic DB32)",
             "dawnbringer-16 (Compact DB16)",
             "pico-8 (16-Color Retro)",
-            "resurrect-64 (High-Detail)",
             "sweetie-16 (Pastel Vibrant)",
             "nes-54 (Nintendo Famicom)",
             "snes-classic (Super Nintendo)",
@@ -102,10 +115,10 @@ class PixelArtSmithApp:
             "gameboy-pocket (Grayscale)",
             "gameboy-color (GBC 32-Color)",
             "c64-commodore (Commodore 16)",
+            "endesga-64 (Rich RPG)",
+            "adaptive-12 (K-Means 12)",
             "adaptive-16 (K-Means 16)",
             "adaptive-24 (K-Means 24)",
-            "adaptive-32 (K-Means 32)",
-            "adaptive-64 (K-Means 64)",
             "none (Raw True-Grid Only)"
         ]
         self.var_palette_display = tk.StringVar(value=palette_options[0])
@@ -115,29 +128,21 @@ class PixelArtSmithApp:
             self.opt_palette = ttk.Combobox(self.sidebar, values=palette_options, textvariable=self.var_palette_display, state="readonly")
         self.opt_palette.pack(padx=15, pady=(0, 8), fill="x")
 
-        # Pitch Auto-Detect vs Manual
-        self.var_auto_pitch = tk.BooleanVar(value=True)
-        self.var_pitch = tk.IntVar(value=8)
-
+        # Max Discrete Colors Slider (Posterization)
+        self._create_label("Max Colors per Character (10~16):")
+        self.var_max_colors = tk.IntVar(value=14)
         if GUI_BACKEND == "customtkinter":
-            self.chk_auto_pitch = ctk.CTkCheckBox(self.sidebar, text="Auto-Detect Pixel Pitch", variable=self.var_auto_pitch, command=self._toggle_pitch_slider)
+            self.slider_colors = ctk.CTkSlider(self.sidebar, from_=8, to=24, number_of_steps=16, variable=self.var_max_colors)
+            self.lbl_colors_val = ctk.CTkLabel(self.sidebar, textvariable=self.var_max_colors)
         else:
-            self.chk_auto_pitch = tk.Checkbutton(self.sidebar, text="Auto-Detect Pixel Pitch", variable=self.var_auto_pitch, bg="#242424", fg="white", selectcolor="#444")
-        self.chk_auto_pitch.pack(padx=15, pady=(4, 4), anchor="w")
-
-        self.lbl_pitch_title = self._create_label("Manual Pitch Override (px):")
-        if GUI_BACKEND == "customtkinter":
-            self.slider_pitch = ctk.CTkSlider(self.sidebar, from_=4, to=16, number_of_steps=6, variable=self.var_pitch)
-            self.lbl_pitch_val = ctk.CTkLabel(self.sidebar, textvariable=self.var_pitch)
-        else:
-            self.slider_pitch = tk.Scale(self.sidebar, from_=4, to=16, resolution=2, orient="horizontal", variable=self.var_pitch, bg="#242424", fg="white")
-            self.lbl_pitch_val = tk.Label(self.sidebar, textvariable=self.var_pitch, bg="#242424", fg="white")
-        self.slider_pitch.pack(padx=15, fill="x")
-        self.lbl_pitch_val.pack(padx=15, anchor="e")
+            self.slider_colors = tk.Scale(self.sidebar, from_=8, to=24, orient="horizontal", variable=self.var_max_colors, bg="#242424", fg="white")
+            self.lbl_colors_val = tk.Label(self.sidebar, textvariable=self.var_max_colors, bg="#242424", fg="white")
+        self.slider_colors.pack(padx=15, fill="x")
+        self.lbl_colors_val.pack(padx=15, anchor="e")
 
         # Scale Factor
-        self._create_label("Export Scale (Nearest Neighbor):")
-        scale_options = ["1x (Raw 1:1 Grid)", "2x", "3x", "4x (Recommended)", "6x", "8x"]
+        self._create_label("Export Display Scale:")
+        scale_options = ["4x (Recommended)", "1x (Raw 1:1 Grid)", "2x", "3x", "6x", "8x"]
         self.var_scale = tk.StringVar(value="4x (Recommended)")
         if GUI_BACKEND == "customtkinter":
             self.opt_scale = ctk.CTkOptionMenu(self.sidebar, values=scale_options, variable=self.var_scale)
@@ -147,17 +152,21 @@ class PixelArtSmithApp:
 
         # Toggles
         self.var_remove_bg = tk.BooleanVar(value=True)
+        self.var_solid_outline = tk.BooleanVar(value=True)
         self.var_clean = tk.BooleanVar(value=True)
 
         if GUI_BACKEND == "customtkinter":
             self.chk_bg = ctk.CTkCheckBox(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg)
+            self.chk_outline = ctk.CTkCheckBox(self.sidebar, text="Solid 1px Black Outline", variable=self.var_solid_outline)
             self.chk_clean = ctk.CTkCheckBox(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean)
         else:
             self.chk_bg = tk.Checkbutton(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg, bg="#242424", fg="white", selectcolor="#444")
+            self.chk_outline = tk.Checkbutton(self.sidebar, text="Solid 1px Black Outline", variable=self.var_solid_outline, bg="#242424", fg="white", selectcolor="#444")
             self.chk_clean = tk.Checkbutton(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean, bg="#242424", fg="white", selectcolor="#444")
 
-        self.chk_bg.pack(padx=15, pady=4, anchor="w")
-        self.chk_clean.pack(padx=15, pady=4, anchor="w")
+        self.chk_bg.pack(padx=15, pady=3, anchor="w")
+        self.chk_outline.pack(padx=15, pady=3, anchor="w")
+        self.chk_clean.pack(padx=15, pady=3, anchor="w")
 
         # Action Buttons
         if GUI_BACKEND == "customtkinter":
@@ -201,13 +210,12 @@ class PixelArtSmithApp:
         self.tab_compare.grid_columnconfigure(1, weight=1)
         self.tab_compare.grid_rowconfigure(1, weight=1)
 
-        # Header labels
         if GUI_BACKEND == "customtkinter":
             lbl_orig = ctk.CTkLabel(self.tab_compare, text="Original AI Sprite Sheet", font=ctk.CTkFont(size=13, weight="bold"))
-            lbl_proc = ctk.CTkLabel(self.tab_compare, text="True-Grid Matrix Pixel Art", font=ctk.CTkFont(size=13, weight="bold"))
+            lbl_proc = ctk.CTkLabel(self.tab_compare, text="True-Grid Matrix Pixel Art (Consolidated)", font=ctk.CTkFont(size=13, weight="bold"))
         else:
             lbl_orig = tk.Label(self.tab_compare, text="Original AI Sprite Sheet", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
-            lbl_proc = tk.Label(self.tab_compare, text="True-Grid Matrix Pixel Art", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
+            lbl_proc = tk.Label(self.tab_compare, text="True-Grid Matrix Pixel Art (Consolidated)", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
 
         lbl_orig.grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
         lbl_proc.grid(row=0, column=1, padx=8, pady=(6, 2), sticky="w")
@@ -268,10 +276,6 @@ class PixelArtSmithApp:
         lbl.pack(padx=15, pady=(6, 2), anchor="w")
         return lbl
 
-    def _toggle_pitch_slider(self):
-        # Optional pitch slider enable/disable
-        pass
-
     def _on_open_file(self):
         file_path = filedialog.askopenfilename(
             filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.webp;*.bmp")]
@@ -288,6 +292,16 @@ class PixelArtSmithApp:
         raw_val = self.var_palette_display.get()
         return raw_val.split()[0].lower()
 
+    def _get_pitch_from_res_preset(self) -> int:
+        val = self.var_resolution.get()
+        if "32x32" in val or "Pitch 8" in val:
+            return 8
+        elif "64x64" in val or "Pitch 4" in val:
+            return 4
+        elif "48x48" in val or "Pitch 6" in val:
+            return 6
+        return 8
+
     def _on_process(self):
         if self.raw_image is None:
             messagebox.showwarning("Warning", "Please open an image first.")
@@ -301,11 +315,12 @@ class PixelArtSmithApp:
                 # 1. Configuration parameters
                 palette_name = self._get_selected_palette_name()
                 scale_str = self.var_scale.get()
-                scale = int(scale_str[0]) if scale_str[0].isdigit() else 2
+                scale = int(scale_str[0]) if scale_str[0].isdigit() else 4
                 remove_bg = self.var_remove_bg.get()
+                solid_outline = self.var_solid_outline.get()
                 clean_orphans = self.var_clean.get()
-                auto_pitch = self.var_auto_pitch.get()
-                manual_pitch = self.var_pitch.get()
+                max_colors = self.var_max_colors.get()
+                pitch = self._get_pitch_from_res_preset()
 
                 # 2. Background removal
                 if remove_bg:
@@ -313,35 +328,41 @@ class PixelArtSmithApp:
                 else:
                     clean_bg_img = PixelCleaner.cleanup_transparency_halos(self.raw_image)
 
-                # 3. Pitch estimation & Feature-Preserving Mode Pooling
-                pitch = GridDetector.estimate_pixel_pitch(clean_bg_img) if auto_pitch else manual_pitch
+                # 3. True-Grid Downsampling
                 grid_img = GridDetector.feature_preserving_downsample(
                     clean_bg_img,
                     pitch=pitch,
-                    outline_boost=2.2,
-                    contrast_boost=1.5
+                    outline_boost=2.0,
+                    contrast_boost=1.4
                 )
 
                 # 4. Clean orphan pixels
                 if clean_orphans:
                     grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
 
-                # 5. Palette snapping
-                quantizer = None
-                palette_colors = []
-                if palette_name.startswith("adaptive-"):
-                    n = int(palette_name.split("-")[1])
-                    palette_colors = PaletteQuantizer.extract_adaptive_palette(grid_img, n_colors=n)
-                    quantizer = PaletteQuantizer(custom_colors=palette_colors)
+                # 5. Strict Ramp Consolidation & Palette Snapping
+                palette_colors: List[str] = []
+                if palette_name.startswith("snapper") or palette_name.startswith("adaptive-"):
+                    grid_img, palette_colors = PixelPosterizer.consolidate_color_ramps(
+                        grid_img,
+                        max_colors=max_colors,
+                        enforce_black_outline=solid_outline,
+                        outline_lum_thresh=45.0,
+                        flat_median_passes=1
+                    )
                 elif palette_name in PALETTES:
+                    grid_img, _ = PixelPosterizer.consolidate_color_ramps(
+                        grid_img,
+                        max_colors=max_colors,
+                        enforce_black_outline=False,
+                        flat_median_passes=1
+                    )
                     quantizer = PaletteQuantizer(palette_name=palette_name)
+                    grid_img = quantizer.quantize(grid_img)
                     palette_colors = quantizer.get_colors_hex()
 
-                if quantizer:
-                    grid_img = quantizer.quantize(grid_img)
-
                 # 6. 2D Matrix isolation
-                isolator = SpriteIsolator(min_area=16, padding=1)
+                isolator = SpriteIsolator(min_area=12, padding=1)
                 matrix = isolator.isolate_matrix(grid_img)
 
                 # Optimal cell size
@@ -360,13 +381,13 @@ class PixelArtSmithApp:
                 self.std_grid = std_grid
                 self.metadata = meta
 
-                self.root.after(0, lambda: self._on_process_finished(len(matrix), sum(len(r) for r in matrix), pitch, cell_size, scale))
+                self.root.after(0, lambda: self._on_process_finished(len(matrix), sum(len(r) for r in matrix), pitch, cell_size, scale, len(palette_colors)))
             except Exception as ex:
                 self.root.after(0, lambda: self._on_process_error(str(ex)))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _on_process_finished(self, n_rows: int, total_frames: int, pitch: int, cell_size: Tuple[int, int], scale: int):
+    def _on_process_finished(self, n_rows: int, total_frames: int, pitch: int, cell_size: Tuple[int, int], scale: int, n_colors: int):
         self.btn_process.configure(state="normal")
         if self.processed_sheet:
             self._show_on_canvas(self.canvas_proc, self.processed_sheet)
@@ -382,7 +403,7 @@ class PixelArtSmithApp:
                 self.var_motion_select.set(motion_options[0])
 
         self.lbl_status.configure(
-            text=f"Done! Pitch: {pitch}px | {n_rows} Motions ({total_frames} frames) | Cell: {cell_size[0]}x{cell_size[1]}px ({scale}x)"
+            text=f"Done! Pitch: {pitch}px | {n_colors} Colors | {n_rows} Motions ({total_frames} frames) | Cell: {cell_size[0]}x{cell_size[1]}px ({scale}x)"
         )
 
     def _on_process_error(self, err_msg: str):
@@ -391,7 +412,6 @@ class PixelArtSmithApp:
         messagebox.showerror("Processing Error", f"Failed to process sprite sheet:\n{err_msg}")
 
     def _on_motion_change(self, val: str):
-        # Parse selected motion index
         try:
             self.anim_motion_idx = int(val.split()[2])
         except Exception:
@@ -460,18 +480,9 @@ class PixelArtSmithApp:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, indent=2)
 
-        # Export individual motion frames folder
-        frames_dir = out_path.parent / f"{out_path.stem}_frames"
-        frames_dir.mkdir(exist_ok=True)
-        count = 0
-        for r_idx, row in enumerate(self.std_grid):
-            for c_idx, frame_img in enumerate(row):
-                frame_img.save(frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png")
-                count += 1
-
         messagebox.showinfo(
             "Export Success",
-            f"Successfully exported:\n- Matrix Sheet: {out_path.name}\n- Agentic Metadata: {meta_path.name}\n- {count} Frames: {frames_dir.name}/"
+            f"Successfully exported:\n- Matrix Sheet: {out_path.name}\n- Agentic Metadata: {meta_path.name}"
         )
 
     def _show_on_canvas(self, canvas: tk.Canvas, pil_img: Image.Image, scale_zoom: float = 1.0):
@@ -488,7 +499,7 @@ class PixelArtSmithApp:
         photo = ImageTk.PhotoImage(resized)
 
         canvas.delete("all")
-        canvas.image = photo  # Keep reference
+        canvas.image = photo
         canvas.create_image(cw // 2, ch // 2, image=photo, anchor="center")
 
 
