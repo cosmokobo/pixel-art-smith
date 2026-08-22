@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Chroma-Weighted Quantization."""
+"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player, Grid Modes & Adaptive Palette Slider."""
 
 import os
 import sys
@@ -37,8 +37,8 @@ class PixelArtSmithApp:
     def __init__(self, root):
         self.root = root
         self.root.title("🎨 PixelArtSmith Studio - True-Grid AI Pixel Art & Animation Lab")
-        self.root.geometry("1240x840")
-        self.root.minsize(1020, 720)
+        self.root.geometry("1280x860")
+        self.root.minsize(1040, 740)
 
         # State
         self.current_image_path: Optional[Path] = None
@@ -67,9 +67,9 @@ class PixelArtSmithApp:
         # Left Control Sidebar
         # ---------------------------------------------------------------------
         if GUI_BACKEND == "customtkinter":
-            self.sidebar = ctk.CTkScrollableFrame(self.root, width=320, corner_radius=0)
+            self.sidebar = ctk.CTkScrollableFrame(self.root, width=330, corner_radius=0)
         else:
-            self.sidebar = tk.Frame(self.root, width=320, bg="#242424")
+            self.sidebar = tk.Frame(self.root, width=330, bg="#242424")
 
         self.sidebar.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
@@ -87,12 +87,27 @@ class PixelArtSmithApp:
             self.btn_open = tk.Button(self.sidebar, text="📁 Open Sprite Image", command=self._on_open_file)
         self.btn_open.pack(padx=15, pady=(0, 12), fill="x")
 
-        # Resolution Preset
-        self._create_label("Resolution Preset:")
+        # 1. Grid Mode / Packaging Mode
+        self._create_label("Grid Packaging Mode:")
+        grid_mode_options = [
+            "auto-fit (Auto-Fit Standardized Cell)",
+            "fixed-32 (32x32px Retro Snapper Standard)",
+            "fixed-48 (48x48px Console / RPG Standard)",
+            "fixed-64 (64x64px HD Pixel Art Standard)"
+        ]
+        self.var_grid_mode = tk.StringVar(value=grid_mode_options[0])
+        if GUI_BACKEND == "customtkinter":
+            self.opt_grid_mode = ctk.CTkOptionMenu(self.sidebar, values=grid_mode_options, variable=self.var_grid_mode)
+        else:
+            self.opt_grid_mode = ttk.Combobox(self.sidebar, values=grid_mode_options, textvariable=self.var_grid_mode, state="readonly")
+        self.opt_grid_mode.pack(padx=15, pady=(0, 8), fill="x")
+
+        # 2. Pixel Pitch Resolution Preset
+        self._create_label("Dot Pitch (Resolution):")
         res_options = [
-            "Retro Snapper (32x32px - Pitch 8px)",
-            "High-Detail RPG (64x64px - Pitch 4px)",
-            "Medium Console (48x48px - Pitch 6px)"
+            "8px Pitch (32x32 Standard Character)",
+            "4px Pitch (64x64 High-Detail RPG)",
+            "6px Pitch (48x48 Medium Console)"
         ]
         self.var_resolution = tk.StringVar(value=res_options[0])
         if GUI_BACKEND == "customtkinter":
@@ -101,13 +116,16 @@ class PixelArtSmithApp:
             self.opt_resolution = ttk.Combobox(self.sidebar, values=res_options, textvariable=self.var_resolution, state="readonly")
         self.opt_resolution.pack(padx=15, pady=(0, 8), fill="x")
 
-        # Palette Selector
-        self._create_label("Color Palette & Ramp Mode:")
+        # 3. Palette Selector
+        self._create_label("Color Palette Mode:")
         palette_options = [
+            "None (Adaptive Colors - Slider Driven)",
             "snapper-13 (Clean 13-Color Semantic Ramps)",
+            "snapper-16 (Enhanced 16-Color Semantic Ramps)",
             "endesga-32 (Fantasy RPG)",
-            "dawnbringer-16 (Compact DB16)",
+            "endesga-64 (Rich RPG - 64 Colors)",
             "pico-8 (16-Color Retro)",
+            "dawnbringer-16 (Compact DB16)",
             "sweetie-16 (Pastel Vibrant)",
             "nes-54 (Nintendo Famicom)",
             "snes-classic (Super Nintendo)",
@@ -115,32 +133,42 @@ class PixelArtSmithApp:
             "gameboy-classic (DMG-01 4-Color)",
             "gameboy-pocket (Grayscale)",
             "gameboy-color (GBC 32-Color)",
-            "c64-commodore (Commodore 16)",
-            "endesga-64 (Rich RPG)",
-            "adaptive-12 (K-Means 12)",
-            "adaptive-16 (K-Means 16)",
-            "none (Raw Grid Only)"
+            "c64-commodore (Commodore 16)"
         ]
         self.var_palette_display = tk.StringVar(value=palette_options[0])
         if GUI_BACKEND == "customtkinter":
-            self.opt_palette = ctk.CTkOptionMenu(self.sidebar, values=palette_options, variable=self.var_palette_display)
+            self.opt_palette = ctk.CTkOptionMenu(self.sidebar, values=palette_options, variable=self.var_palette_display, command=self._on_palette_changed)
         else:
             self.opt_palette = ttk.Combobox(self.sidebar, values=palette_options, textvariable=self.var_palette_display, state="readonly")
+            self.opt_palette.bind("<<ComboboxSelected>>", lambda e: self._on_palette_changed(self.var_palette_display.get()))
         self.opt_palette.pack(padx=15, pady=(0, 8), fill="x")
 
-        # Max Discrete Colors Slider (Posterization)
-        self._create_label("Max Colors per Character (10~16):")
-        self.var_max_colors = tk.IntVar(value=13)
+        # 4. Max Colors Slider (8 ~ 64) with Quick-Buttons
+        self.lbl_color_slider_title = self._create_label("Adaptive Colors: 16 (Range: 8 ~ 64):")
+        self.var_max_colors = tk.IntVar(value=16)
         if GUI_BACKEND == "customtkinter":
-            self.slider_colors = ctk.CTkSlider(self.sidebar, from_=8, to=24, number_of_steps=16, variable=self.var_max_colors)
-            self.lbl_colors_val = ctk.CTkLabel(self.sidebar, textvariable=self.var_max_colors)
+            self.slider_colors = ctk.CTkSlider(self.sidebar, from_=8, to=64, number_of_steps=56, variable=self.var_max_colors, command=self._on_slider_changed)
+            self.lbl_colors_val = ctk.CTkLabel(self.sidebar, text="16 colors")
         else:
-            self.slider_colors = tk.Scale(self.sidebar, from_=8, to=24, orient="horizontal", variable=self.var_max_colors, bg="#242424", fg="white")
-            self.lbl_colors_val = tk.Label(self.sidebar, textvariable=self.var_max_colors, bg="#242424", fg="white")
+            self.slider_colors = tk.Scale(self.sidebar, from_=8, to=64, orient="horizontal", variable=self.var_max_colors, bg="#242424", fg="white", command=lambda v: self._on_slider_changed(int(v)))
+            self.lbl_colors_val = tk.Label(self.sidebar, text="16 colors", bg="#242424", fg="white")
         self.slider_colors.pack(padx=15, fill="x")
         self.lbl_colors_val.pack(padx=15, anchor="e")
 
-        # Scale Factor
+        # Quick Preset Buttons: 8, 16, 32, 64
+        if GUI_BACKEND == "customtkinter":
+            btn_box = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            for c_val in [8, 16, 32, 64]:
+                btn = ctk.CTkButton(btn_box, text=f"{c_val}c", width=55, height=24, font=ctk.CTkFont(size=11), command=lambda v=c_val: self._set_color_slider(v))
+                btn.pack(side="left", padx=3)
+        else:
+            btn_box = tk.Frame(self.sidebar, bg="#242424")
+            for c_val in [8, 16, 32, 64]:
+                btn = tk.Button(btn_box, text=f"{c_val}c", width=4, font=("Helvetica", 9), command=lambda v=c_val: self._set_color_slider(v))
+                btn.pack(side="left", padx=2)
+        btn_box.pack(padx=15, pady=(2, 8), fill="x")
+
+        # 5. Export Scale Factor
         self._create_label("Export Display Scale:")
         scale_options = ["4x (Recommended)", "1x (Raw 1:1 Grid)", "2x", "3x", "6x", "8x"]
         self.var_scale = tk.StringVar(value="4x (Recommended)")
@@ -177,9 +205,9 @@ class PixelArtSmithApp:
 
         # Status Box
         if GUI_BACKEND == "customtkinter":
-            self.lbl_status = ctk.CTkLabel(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=280)
+            self.lbl_status = ctk.CTkLabel(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=290)
         else:
-            self.lbl_status = tk.Label(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=280, bg="#242424", fg="#aaa")
+            self.lbl_status = tk.Label(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=290, bg="#242424", fg="#aaa")
         self.lbl_status.pack(padx=15, pady=(12, 10), anchor="w")
 
         # ---------------------------------------------------------------------
@@ -272,6 +300,25 @@ class PixelArtSmithApp:
         lbl.pack(padx=15, pady=(6, 2), anchor="w")
         return lbl
 
+    def _on_palette_changed(self, val: str):
+        if val.startswith("None"):
+            self.lbl_color_slider_title.configure(text=f"Adaptive Colors: {self.var_max_colors.get()} (8 ~ 64):")
+        else:
+            pal_name = val.split()[0]
+            self.lbl_color_slider_title.configure(text=f"Preset: {pal_name} (Clamping: {self.var_max_colors.get()}c):")
+
+    def _on_slider_changed(self, val):
+        c = int(val)
+        if self.var_palette_display.get().startswith("None"):
+            self.lbl_colors_val.configure(text=f"{c} colors (Adaptive)")
+            self.lbl_color_slider_title.configure(text=f"Adaptive Colors: {c} (8 ~ 64):")
+        else:
+            self.lbl_colors_val.configure(text=f"{c} max colors")
+
+    def _set_color_slider(self, val: int):
+        self.var_max_colors.set(val)
+        self._on_slider_changed(val)
+
     def _on_open_file(self):
         file_path = filedialog.askopenfilename(
             filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.webp;*.bmp")]
@@ -286,15 +333,21 @@ class PixelArtSmithApp:
 
     def _get_selected_palette_name(self) -> str:
         raw_val = self.var_palette_display.get()
+        if raw_val.startswith("None"):
+            return "none"
+        return raw_val.split()[0].lower()
+
+    def _get_selected_grid_mode(self) -> str:
+        raw_val = self.var_grid_mode.get()
         return raw_val.split()[0].lower()
 
     def _get_pitch_from_res_preset(self) -> int:
         val = self.var_resolution.get()
-        if "32x32" in val or "Pitch 8" in val:
+        if "8px" in val or "32x32" in val:
             return 8
-        elif "64x64" in val or "Pitch 4" in val:
+        elif "4px" in val or "64x64" in val:
             return 4
-        elif "48x48" in val or "Pitch 6" in val:
+        elif "6px" in val or "48x48" in val:
             return 6
         return 8
 
@@ -309,6 +362,7 @@ class PixelArtSmithApp:
         def task():
             try:
                 palette_name = self._get_selected_palette_name()
+                grid_mode = self._get_selected_grid_mode()
                 scale_str = self.var_scale.get()
                 scale = int(scale_str[0]) if scale_str[0].isdigit() else 4
                 remove_bg = self.var_remove_bg.get()
@@ -336,10 +390,12 @@ class PixelArtSmithApp:
 
                 # 4. Chroma-Weighted Semantic Quantization
                 palette_colors: List[str] = []
-                if palette_name.startswith("snapper") or palette_name.startswith("adaptive"):
+                if palette_name == "none" or palette_name.startswith("adaptive") or palette_name.startswith("snapper"):
+                    # Use adaptive semantic palette with slider's max_colors
+                    n_c = int(palette_name.split("-")[1]) if "-" in palette_name else max_colors
                     grid_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
                         grid_img,
-                        max_colors=max_colors,
+                        max_colors=n_c,
                         w_chroma=2.0
                     )
                 elif palette_name in PALETTES:
@@ -353,31 +409,32 @@ class PixelArtSmithApp:
                         w_chroma=2.0
                     )
 
-                # 5. 2D Matrix isolation
+                # 5. 2D Matrix isolation & Grid Mode resolution
                 isolator = SpriteIsolator(min_area=12, padding=1)
                 matrix = isolator.isolate_matrix(grid_img)
 
-                cell_size = SpritePacker.calculate_optimal_cell_size(matrix)
+                cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
 
                 packed_sheet, meta, std_grid = SpritePacker.pack_matrix_sheet(
                     matrix=matrix,
                     cell_size=cell_size,
                     scale=scale,
-                    palette_name=palette_name,
-                    palette_colors=palette_colors
+                    palette_name=palette_name if palette_name != "none" else f"adaptive-{max_colors}",
+                    palette_colors=palette_colors,
+                    grid_mode=grid_mode
                 )
 
                 self.processed_sheet = packed_sheet
                 self.std_grid = std_grid
                 self.metadata = meta
 
-                self.root.after(0, lambda: self._on_process_finished(len(matrix), sum(len(r) for r in matrix), pitch, cell_size, scale, len(palette_colors)))
+                self.root.after(0, lambda: self._on_process_finished(len(matrix), sum(len(r) for r in matrix), pitch, cell_size, scale, len(palette_colors), grid_mode))
             except Exception as ex:
                 self.root.after(0, lambda: self._on_process_error(str(ex)))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _on_process_finished(self, n_rows: int, total_frames: int, pitch: int, cell_size: Tuple[int, int], scale: int, n_colors: int):
+    def _on_process_finished(self, n_rows: int, total_frames: int, pitch: int, cell_size: Tuple[int, int], scale: int, n_colors: int, grid_mode: str):
         self.btn_process.configure(state="normal")
         if self.processed_sheet:
             self._show_on_canvas(self.canvas_proc, self.processed_sheet)
@@ -392,7 +449,7 @@ class PixelArtSmithApp:
                 self.var_motion_select.set(motion_options[0])
 
         self.lbl_status.configure(
-            text=f"Done! Pitch: {pitch}px | {n_colors} Colors | {n_rows} Motions ({total_frames} frames) | Cell: {cell_size[0]}x{cell_size[1]}px ({scale}x)"
+            text=f"Done! Pitch: {pitch}px | Mode: {grid_mode} | {n_colors} Colors | {n_rows} Motions ({total_frames} frames) | Cell: {cell_size[0]}x{cell_size[1]}px ({scale}x)"
         )
 
     def _on_process_error(self, err_msg: str):
