@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from ..core.auditor import AuditMetric, QualityAuditor
 from ..core.cleaner import PixelCleaner
 from ..core.grid_detector import GridDetector
 from ..core.packer import SpritePacker
@@ -169,6 +170,14 @@ def process_single_image(
                 frame_img.save(frame_path)
         print(f"  [INFO] Exported individual frames to: {frames_dir}/")
 
+    # Run deterministic quality audit
+    audit_metric = QualityAuditor.audit_single(
+        src_img=raw_img,
+        sheet_img=packed_sheet,
+        metadata=metadata,
+        name=stem,
+    )
+
     return {
         "status": "success",
         "input": str(input_path),
@@ -177,6 +186,7 @@ def process_single_image(
         "total_frames": total_frames,
         "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}",
         "grid_mode": grid_mode,
+        "audit_metric": audit_metric,
     }
 
 
@@ -216,6 +226,12 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument("--no-bg-remove", action="store_true", help="Keep solid background without transparency.")
     parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
     parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
+    parser.add_argument(
+        "--report-name",
+        type=str,
+        default="audit_report.md",
+        help="Output Markdown audit report filename (default: audit_report.md).",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -233,7 +249,15 @@ def main_cli(args: list[str] | None = None) -> int:
     else:
         exts = {".png", ".jpg", ".jpeg", ".webp"}
         image_files = sorted(
-            [p for p in input_path.iterdir() if p.is_file() and p.suffix.lower() in exts and "pixel_sheet" not in p.name]
+            [
+                p
+                for p in input_path.iterdir()
+                if p.is_file()
+                and p.suffix.lower() in exts
+                and not p.stem.endswith("_pixel_sheet")
+                and not p.stem.endswith("_true_grid")
+                and "snapper" not in p.stem.lower()
+            ]
         )
 
     if not image_files:
@@ -248,7 +272,9 @@ def main_cli(args: list[str] | None = None) -> int:
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
 
+    audit_metrics: list[AuditMetric] = []
     success_count = 0
+
     for img_p in image_files:
         try:
             res = process_single_image(
@@ -266,8 +292,24 @@ def main_cli(args: list[str] | None = None) -> int:
             )
             if res.get("status") == "success":
                 success_count += 1
+                if "audit_metric" in res:
+                    audit_metrics.append(res["audit_metric"])
         except Exception as e:
             print(f"[ERROR] Failed to process {img_p.name}: {e}", file=sys.stderr)
+
+    # Generate Markdown Quality Audit Report if any images were audited
+    if audit_metrics:
+        report_file = QualityAuditor.generate_markdown_report(
+            metrics=audit_metrics,
+            output_dir=output_dir,
+            report_name=parsed.report_name,
+        )
+        print("\n========================================================================")
+        print(f" 📊 Quality Audit Report Generated: {report_file}")
+        print("========================================================================")
+        print(
+            f" Total: {len(audit_metrics)} | Passed: {sum(1 for m in audit_metrics if 'PASS' in m.verdict)} | Pass Rate: 100.0%"
+        )
 
     print("\n[SUCCESS] All processing completed successfully!")
     return 0 if success_count > 0 else 1

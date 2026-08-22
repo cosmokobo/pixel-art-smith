@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PixelArtSmith Core Module."""
 
+from .auditor import AuditMetric, QualityAuditor
 from .bg_remover import BackgroundRemover
 from .cleaner import PixelCleaner
 from .grid_detector import GridDetector
@@ -21,4 +22,6 @@ __all__ = [
     "PixelCleaner",
     "SpritePacker",
     "PixelPosterizer",
+    "QualityAuditor",
+    "AuditMetric",
 ]
