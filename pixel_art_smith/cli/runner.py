@@ -123,35 +123,50 @@ def process_single_image(
     if clean_orphans:
         clean_img = PixelCleaner.remove_orphan_pixels(clean_img)
 
-    # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames) & Packing
-    print("  [4/4] Segmenting & Assembling Matrix Sprite Sheet...")
-    isolator = SpriteIsolator(min_area=12, padding=1)
-    matrix = isolator.isolate_matrix(clean_img, expected_rows=expected_rows, expected_cols=expected_cols)
+    # 4. Binary Routing: 4-Motion Sprite Sheet (Track A) vs Snapper-Parity Clean Canvas (Track B)
+    is_4_motion = SpriteIsolator.detect_4_motion_sheet(clean_img)
+    force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas")
 
-    n_rows = len(matrix)
-    row_counts = [len(r) for r in matrix]
-    total_frames = sum(row_counts)
-    print(f"  --> Identified {n_rows} motion row(s) with frames: {row_counts} (Total {total_frames} frames).")
+    if is_4_motion and not force_canvas:
+        print("  [4/4] Segmenting & Assembling Matrix Sprite Sheet (Track A: 4x4 Sheet Mode)...")
+        isolator = SpriteIsolator(min_area=12, padding=1)
+        matrix = isolator.isolate_matrix(clean_img, expected_rows=expected_rows, expected_cols=expected_cols)
 
-    if cell_size is not None:
-        final_cell_size = cell_size
+        n_rows = len(matrix)
+        row_counts = [len(r) for r in matrix]
+        total_frames = sum(row_counts)
+        print(f"  --> Identified {n_rows} motion row(s) with frames: {row_counts} (Total {total_frames} frames).")
+
+        if cell_size is not None:
+            final_cell_size = cell_size
+        else:
+            final_cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
+        print(f"        Resolved cell size ({grid_mode}): {final_cell_size[0]}x{final_cell_size[1]}px")
+
+        packed_sheet, metadata, std_grid = SpritePacker.pack_matrix_sheet(
+            matrix=matrix,
+            cell_size=final_cell_size,
+            scale=scale,
+            palette_name=palette_name,
+            palette_colors=palette_colors,
+            grid_mode=grid_mode,
+        )
     else:
-        final_cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
-    print(f"        Resolved cell size ({grid_mode}): {final_cell_size[0]}x{final_cell_size[1]}px")
-
-    packed_sheet, metadata, std_grid = SpritePacker.pack_matrix_sheet(
-        matrix=matrix,
-        cell_size=final_cell_size,
-        scale=scale,
-        palette_name=palette_name,
-        palette_colors=palette_colors,
-        grid_mode=grid_mode,
-    )
+        print("  [4/4] Non-4-motion structure detected -> Snapper-Parity Canvas Mode (Track B: 1:1 Clean Asset)...")
+        n_rows = 1
+        total_frames = 1
+        final_cell_size = clean_img.size
+        packed_sheet, metadata, std_grid = SpritePacker.pack_canvas_sheet(
+            canvas_img=clean_img,
+            scale=scale,
+            palette_name=palette_name,
+            palette_colors=palette_colors,
+        )
 
     stem = input_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save primary packed sprite sheet (clean 1 file)
+    # Save primary output image
     sheet_path = output_dir / f"{stem}_pixel_sheet.png"
     packed_sheet.save(sheet_path)
     print(f"  [SUCCESS] Output Sprite Sheet: {sheet_path}")

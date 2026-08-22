@@ -23,6 +23,36 @@ class SpriteIsolator:
         self.min_area = min_area
         self.padding = padding
 
+    @staticmethod
+    def detect_4_motion_sheet(grid_img: Image.Image, min_cell_pixels: int = 25) -> bool:
+        """Detect whether the image conforms to a 4-direction motion sprite sheet.
+
+        Checks whether non-transparent character pixels form a 4-row layout
+        with active content across the matrix. If it's a single monster/canvas
+        or lacks 4 distinct rows, returns False.
+        """
+        arr = np.array(grid_img.convert("RGBA"))
+        alpha = arr[:, :, 3]
+        h, w = alpha.shape
+
+        cell_w = w // 4
+        cell_h = h // 4
+
+        cell_matrix = np.zeros((4, 4), dtype=int)
+        for r in range(4):
+            for c in range(4):
+                x1, y1 = c * cell_w, r * cell_h
+                x2, y2 = (c + 1) * cell_w, (r + 1) * cell_h
+                cell_pixels = int(np.sum(alpha[y1:y2, x1:x2] > 0))
+                cell_matrix[r, c] = cell_pixels
+
+        active_cells = cell_matrix > min_cell_pixels
+        row_counts = np.sum(active_cells, axis=1)
+        total_active = int(np.sum(active_cells))
+
+        # True 4-motion sheets have active pixels in all 4 rows and at least 12/16 cells
+        return bool(np.all(row_counts >= 3) and total_active >= 12)
+
     def isolate_matrix(
         self, grid_img: Image.Image, expected_rows: int | None = 4, expected_cols: int | None = 4
     ) -> list[list[FrameItem]]:

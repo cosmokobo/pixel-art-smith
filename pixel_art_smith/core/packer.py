@@ -163,3 +163,62 @@ class SpritePacker:
         }
 
         return sheet, metadata, std_grid
+
+    @staticmethod
+    def pack_canvas_sheet(
+        canvas_img: Image.Image,
+        scale: int = 1,
+        palette_name: str = "snapper-16",
+        palette_colors: list[str] | None = None,
+    ) -> tuple[Image.Image, dict[str, Any], list[list[Image.Image]]]:
+        """Pack a single-asset / non-4-motion canvas into Snapper-Parity 1:1 Pixel Art.
+
+        Returns:
+            (Packed_Canvas_Image, Metadata_Dict, Single_Frame_Grid)
+        """
+        orig_w, orig_h = canvas_img.size
+        if scale > 1:
+            scaled_img = GridDetector.upscale_nearest(canvas_img, scale=scale)
+        else:
+            scaled_img = canvas_img.copy()
+
+        scaled_w, scaled_h = scaled_img.size
+
+        metadata: dict[str, Any] = {
+            "schema_version": "2.0",
+            "sprite_sheet": {
+                "format": "RGBA8888",
+                "width": scaled_w,
+                "height": scaled_h,
+                "grid_layout": {
+                    "grid_mode": "snapper-canvas",
+                    "rows": 1,
+                    "columns": 1,
+                    "cell_size": {"width": scaled_w, "height": scaled_h},
+                    "logical_cell_size": {"width": orig_w, "height": orig_h},
+                    "scale_factor": scale,
+                },
+                "total_frames": 1,
+            },
+            "palette": {
+                "name": palette_name,
+                "color_count": len(palette_colors) if palette_colors else 0,
+                "colors": palette_colors or [],
+            },
+            "animations": {
+                "single_frame": {
+                    "row_index": 0,
+                    "frame_count": 1,
+                    "frames": [
+                        {
+                            "frame_index": 0,
+                            "rect": {"x": 0, "y": 0, "w": scaled_w, "h": scaled_h},
+                            "anchor": "center",
+                        }
+                    ],
+                }
+            },
+        }
+
+        return scaled_img, metadata, [[scaled_img]]
+
