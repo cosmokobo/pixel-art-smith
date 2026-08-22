@@ -229,8 +229,8 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument(
         "--report-name",
         type=str,
-        default="audit_report.md",
-        help="Output Markdown audit report filename (default: audit_report.md).",
+        default="result.md",
+        help="Output Markdown audit report filename (default: result.md).",
     )
 
     parsed = parser.parse_args(args)
