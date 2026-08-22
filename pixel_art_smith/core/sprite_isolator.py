@@ -24,34 +24,65 @@ class SpriteIsolator:
         self.padding = padding
 
     @staticmethod
-    def detect_4_motion_sheet(grid_img: Image.Image, min_cell_pixels: int = 25) -> bool:
-        """Detect whether the image conforms to a 4-direction motion sprite sheet.
+    def detect_matrix_layout(grid_img: Image.Image) -> tuple[str, int, int]:
+        """Detect whether the image is a Motion Matrix Sprite Sheet or a Snapper-Parity Canvas.
 
-        Checks whether non-transparent character pixels form a 4-row layout
-        with active content across the matrix. If it's a single monster/canvas
-        or lacks 4 distinct rows, returns False.
+        Returns:
+            (mode: "sheet" | "canvas", rows: int, cols: int)
         """
         arr = np.array(grid_img.convert("RGBA"))
         alpha = arr[:, :, 3]
         h, w = alpha.shape
 
-        cell_w = w // 4
-        cell_h = h // 4
+        # 1. Y-axis projection to find motion rows
+        y_proj = np.sum(alpha > 0, axis=1)
+        in_row = False
+        row_bounds = []
+        start_y = 0
+        for y in range(h):
+            if y_proj[y] > 5 and not in_row:
+                in_row = True
+                start_y = y
+            elif y_proj[y] <= 5 and in_row:
+                in_row = False
+                if y - start_y >= 12:
+                    row_bounds.append((start_y, y))
+        if in_row and h - start_y >= 12:
+            row_bounds.append((start_y, h))
 
-        cell_matrix = np.zeros((4, 4), dtype=int)
-        for r in range(4):
-            for c in range(4):
-                x1, y1 = c * cell_w, r * cell_h
-                x2, y2 = (c + 1) * cell_w, (r + 1) * cell_h
-                cell_pixels = int(np.sum(alpha[y1:y2, x1:x2] > 0))
-                cell_matrix[r, c] = cell_pixels
+        n_rows = len(row_bounds)
+        if n_rows < 2:
+            return "canvas", 1, 1
 
-        active_cells = cell_matrix > min_cell_pixels
-        row_counts = np.sum(active_cells, axis=1)
-        total_active = int(np.sum(active_cells))
+        # 2. X-axis projection per row to detect actual frame columns
+        col_counts = []
+        for r_y1, r_y2 in row_bounds:
+            row_band = alpha[r_y1:r_y2, :]
+            x_proj = np.sum(row_band > 0, axis=0)
+            in_col = False
+            cols = 0
+            start_x = 0
+            for x in range(w):
+                if x_proj[x] > 2 and not in_col:
+                    in_col = True
+                    start_x = x
+                elif x_proj[x] <= 2 and in_col:
+                    in_col = False
+                    if x - start_x >= 4:
+                        cols += 1
+            if in_col and w - start_x >= 4:
+                cols += 1
+            col_counts.append(cols)
 
-        # True 4-motion sheets have active pixels in all 4 rows and at least 12/16 cells
-        return bool(np.all(row_counts >= 3) and total_active >= 12)
+        max_cols = max(col_counts) if col_counts else 4
+        if max_cols >= 5:
+            target_cols = 5
+        elif max_cols >= 3:
+            target_cols = 4
+        else:
+            target_cols = max(1, max_cols)
+
+        return "sheet", n_rows, target_cols
 
     def isolate_matrix(
         self, grid_img: Image.Image, expected_rows: int | None = 4, expected_cols: int | None = 4

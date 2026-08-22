@@ -123,14 +123,16 @@ def process_single_image(
     if clean_orphans:
         clean_img = PixelCleaner.remove_orphan_pixels(clean_img)
 
-    # 4. Binary Routing: 4-Motion Sprite Sheet (Track A) vs Snapper-Parity Clean Canvas (Track B)
-    is_4_motion = SpriteIsolator.detect_4_motion_sheet(clean_img)
+    # 4. Binary Routing: Adaptive Motion Sprite Sheet (Track A) vs Snapper-Parity Clean Canvas (Track B)
+    detected_mode, auto_rows, auto_cols = SpriteIsolator.detect_matrix_layout(clean_img)
     force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas")
 
-    if is_4_motion and not force_canvas:
-        print("  [4/4] Segmenting & Assembling Matrix Sprite Sheet (Track A: 4x4 Sheet Mode)...")
+    if detected_mode == "sheet" and not force_canvas:
+        eff_rows = expected_rows if expected_rows is not None else auto_rows
+        eff_cols = expected_cols if expected_cols is not None else auto_cols
+        print(f"  [4/4] Segmenting & Assembling Matrix Sprite Sheet (Track A: {eff_rows}x{eff_cols} Sheet Mode)...")
         isolator = SpriteIsolator(min_area=12, padding=1)
-        matrix = isolator.isolate_matrix(clean_img, expected_rows=expected_rows, expected_cols=expected_cols)
+        matrix = isolator.isolate_matrix(clean_img, expected_rows=eff_rows, expected_cols=eff_cols)
 
         n_rows = len(matrix)
         row_counts = [len(r) for r in matrix]
