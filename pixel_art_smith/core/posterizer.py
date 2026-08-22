@@ -1,109 +1,121 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pure Pixel Art Mode-Peak Quantization & Crisp 1px Outline Locking (Zero Blurring)."""
+"""Pure Semantic Palette Extraction & Chroma-Weighted CIELAB Quantization."""
 
 from typing import List, Tuple, Optional
 import numpy as np
 import cv2
 from PIL import Image
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import KMeans
 
 
 class PixelPosterizer:
-    """Consolidates continuous AI colors into crisp, vibrant discrete pixel art tones with zero spatial blurring."""
+    """Consolidates continuous AI colors into discrete, crisp pixel art tones with semantic eye/skin/outline preservation."""
 
     @staticmethod
-    def consolidate_color_ramps(
+    def extract_semantic_palette(
         img: Image.Image,
-        max_colors: int = 14,
-        enforce_black_outline: bool = True,
-        outline_lum_thresh: float = 45.0,
-        flat_median_passes: int = 0  # Default 0 to prevent watercolor bleeding
+        max_colors: int = 13,
+        white_hex: str = "#ececec",
+        black_hex: str = "#000000"
+    ) -> np.ndarray:
+        """Extract a high-contrast semantic palette with dedicated Black outline, White highlight, and Material Medoids."""
+        arr = np.array(img.convert("RGBA"))
+        alpha = arr[:, :, 3]
+        opaque_mask = alpha > 0
+
+        if not np.any(opaque_mask):
+            return np.array([[0, 0, 0], [236, 236, 236]], dtype=np.uint8)
+
+        pixels = arr[opaque_mask, :3]
+        lums = 0.299 * pixels[:, 0] + 0.587 * pixels[:, 1] + 0.114 * pixels[:, 2]
+
+        # Filter out extreme dark (outlines) and extreme bright (whites) from clustering
+        fg_mask = (lums > 35) & (lums < 240)
+        fg_pixels = pixels[fg_mask]
+
+        palette_list: List[List[int]] = [
+            [0, 0, 0],       # 0: Dedicated Pure Black Outline
+            [236, 236, 236]  # 1: Dedicated Pure White / Eye White / Highlight
+        ]
+
+        n_interior = max(2, max_colors - 2)
+
+        if len(fg_pixels) > 0:
+            if len(np.unique(fg_pixels, axis=0)) <= n_interior:
+                for c in np.unique(fg_pixels, axis=0):
+                    palette_list.append(c.tolist())
+            else:
+                lab_fg = cv2.cvtColor(fg_pixels.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3)
+                kmeans = KMeans(n_clusters=n_interior, n_init=5, random_state=42)
+                kmeans.fit(lab_fg)
+
+                labels = kmeans.labels_
+                for k in range(n_interior):
+                    k_mask = labels == k
+                    if np.any(k_mask):
+                        k_colors = fg_pixels[k_mask]
+                        unique_k, counts_k = np.unique(k_colors, axis=0, return_counts=True)
+                        palette_list.append(unique_k[np.argmax(counts_k)].tolist())
+
+        return np.array(palette_list, dtype=np.uint8)
+
+    @staticmethod
+    def quantize_chroma_weighted(
+        img: Image.Image,
+        palette_rgb: np.ndarray,
+        w_chroma: float = 2.0,
+        outline_lum_thresh: float = 35.0
     ) -> Tuple[Image.Image, List[str]]:
-        """Consolidate image colors into max_colors discrete tones using Medoid/Mode Peak Extraction.
-        
-        Zero spatial blurring is used to maintain 100% razor-sharp pixel edges.
+        """Quantize image into the given palette using Chroma-Weighted CIELAB Delta-E.
         
         Args:
-            img: Downsampled RGBA PIL Image.
-            max_colors: Target number of distinct character colors (12~16 typical).
-            enforce_black_outline: Whether to lock all dark boundary pixels to pure #000000.
-            outline_lum_thresh: Luminance threshold for outline detection (0~255).
-            flat_median_passes: Must be 0 to prevent watercolor bleeding across borders.
+            img: Downsampled RGBA Image.
+            palette_rgb: Palette array of shape (N, 3).
+            w_chroma: Weight on A & B color channels (higher = vivid saturated colors are preserved).
+            outline_lum_thresh: Luminance threshold to snap directly to Black slot 0.
             
         Returns:
-            (Consolidated_RGBA_Image, List_Of_Hex_Colors)
+            (Quantized_RGBA_Image, List_Of_Hex_Colors)
         """
         arr = np.array(img.convert("RGBA"))
-        h, w, _ = arr.shape
         alpha = arr[:, :, 3]
         opaque_mask = alpha > 0
 
         if not np.any(opaque_mask):
             return img, []
 
-        fg_rgb = arr[opaque_mask, :3]
+        pixels_rgb = arr[opaque_mask, :3]
+        pixels_lab = cv2.cvtColor(pixels_rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(float)
+        palette_lab = cv2.cvtColor(palette_rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(float)
 
-        if len(fg_rgb) == 0:
-            return img, []
+        diff_L = pixels_lab[:, np.newaxis, 0] - palette_lab[np.newaxis, :, 0]
+        diff_A = pixels_lab[:, np.newaxis, 1] - palette_lab[np.newaxis, :, 1]
+        diff_B = pixels_lab[:, np.newaxis, 2] - palette_lab[np.newaxis, :, 2]
 
-        # 1. CIELAB K-Means Clustering on Opaque Foreground
-        lab_fg = cv2.cvtColor(fg_rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3)
-        n_clusters = max(2, min(max_colors, len(np.unique(fg_rgb, axis=0))))
+        dists = diff_L**2 + (w_chroma**2) * (diff_A**2 + diff_B**2)
 
-        kmeans = MiniBatchKMeans(
-            n_clusters=n_clusters,
-            batch_size=2048,
-            random_state=42,
-            n_init=5
-        )
-        kmeans.fit(lab_fg)
+        # Force dark pixels (L < 35) to slot 0 (Pure Black #000000)
+        is_dark = pixels_lab[:, 0] < outline_lum_thresh
+        nearest_idx = np.argmin(dists, axis=-1)
+        nearest_idx[is_dark] = 0
 
-        # 2. Extract the EXACT Mode/Medoid color of each cluster (NOT the arithmetic mean)
-        # Arithmetic mean creates muddy watercolor desaturation; Mode selects the true vibrant pixel.
-        cluster_centers_rgb = np.zeros((n_clusters, 3), dtype=np.uint8)
-        labels = kmeans.labels_
+        quant_rgb = palette_rgb[nearest_idx]
 
-        for k in range(n_clusters):
-            k_mask = labels == k
-            if np.any(k_mask):
-                k_pixels = fg_rgb[k_mask]
-                unique_k, counts_k = np.unique(k_pixels, axis=0, return_counts=True)
-                # Select the most frequent pure color in this cluster
-                cluster_centers_rgb[k] = unique_k[np.argmax(counts_k)]
-            else:
-                cluster_centers_rgb[k] = [0, 0, 0]
-
-        # 3. Outline Locking
-        lums = 0.299 * cluster_centers_rgb[:, 0] + 0.587 * cluster_centers_rgb[:, 1] + 0.114 * cluster_centers_rgb[:, 2]
-        darkest_k = int(np.argmin(lums))
-
-        if enforce_black_outline:
-            cluster_centers_rgb[darkest_k] = [0, 0, 0]
-
-        # 4. Nearest Neighbor Mapping in CIELAB space
-        centers_lab = cv2.cvtColor(cluster_centers_rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(float)
-        
-        # Calculate Delta-E squared in Lab space
-        diff = lab_fg[:, np.newaxis, :] - centers_lab[np.newaxis, :, :]
-        # Weight L channel higher for contrast separation
-        dists = (1.5 * diff[:, :, 0])**2 + diff[:, :, 1]**2 + diff[:, :, 2]**2
-
-        nearest_k = np.argmin(dists, axis=1)
-
-        # Force dark edge pixels (L < outline_lum_thresh) to darkest outline slot
-        if enforce_black_outline:
-            is_dark = lab_fg[:, 0] < outline_lum_thresh
-            nearest_k[is_dark] = darkest_k
-
-        quant_fg_rgb = cluster_centers_rgb[nearest_k]
-
-        # 5. Assemble final RGBA image
         output_arr = arr.copy()
-        output_arr[opaque_mask, :3] = quant_fg_rgb
+        output_arr[opaque_mask, :3] = quant_rgb
 
-        # Collect unique hex colors
-        unique_colors = np.unique(quant_fg_rgb, axis=0)
+        unique_colors = np.unique(quant_rgb, axis=0)
         hex_colors = [f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}" for c in unique_colors]
 
         return Image.fromarray(output_arr, "RGBA"), hex_colors
+
+    @staticmethod
+    def process_snapper_pipeline(
+        img: Image.Image,
+        max_colors: int = 13,
+        w_chroma: float = 2.0
+    ) -> Tuple[Image.Image, List[str]]:
+        """Complete Snapper-style semantic color quantization pipeline."""
+        palette_rgb = PixelPosterizer.extract_semantic_palette(img, max_colors=max_colors)
+        return PixelPosterizer.quantize_chroma_weighted(img, palette_rgb, w_chroma=w_chroma)

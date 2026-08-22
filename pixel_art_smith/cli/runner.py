@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Headless CLI Runner for PixelArtSmith with Strict Ramp Consolidation & 1px Solid Outlines."""
+"""Headless CLI Runner for PixelArtSmith with Core Sub-Block Sampling & Chroma-Weighted Quantization."""
 
 import os
 import sys
@@ -8,12 +8,13 @@ import argparse
 import json
 from pathlib import Path
 from typing import List, Tuple, Optional
+import numpy as np
 from PIL import Image
 
 from ..core.bg_remover import BackgroundRemover
 from ..core.grid_detector import GridDetector
 from ..core.sprite_isolator import SpriteIsolator, FrameItem
-from ..core.palette import PaletteQuantizer, PALETTES
+from ..core.palette import PaletteQuantizer, PALETTES, hex_to_rgb
 from ..core.cleaner import PixelCleaner
 from ..core.packer import SpritePacker
 from ..core.posterizer import PixelPosterizer
@@ -36,14 +37,14 @@ def process_single_image(
     pitch: Optional[int] = None,
     cell_size: Optional[Tuple[int, int]] = None,
     scale: int = 4,
-    palette_name: str = "snapper-14",
-    max_colors: int = 14,
+    palette_name: str = "snapper-13",
+    max_colors: int = 13,
     remove_bg: bool = True,
     clean_orphans: bool = True,
     export_frames: bool = False,
     bg_remover: Optional[BackgroundRemover] = None
 ) -> dict:
-    """Execute full True-Grid post-processing pipeline on a sprite sheet with Strict Ramp Consolidation."""
+    """Execute full True-Grid post-processing pipeline on a sprite sheet with Semantic Palette Quantization."""
     print(f"\n[INFO] Processing: {input_path.name}")
     raw_img = Image.open(input_path).convert("RGBA")
 
@@ -57,63 +58,48 @@ def process_single_image(
         print("  [1/5] Skipping AI background removal (using existing alpha)...")
         clean_bg_img = PixelCleaner.cleanup_transparency_halos(raw_img)
 
-    # 2. Pitch Detection & True-Grid Downsampling (Global Sheet)
+    # 2. Pitch Detection & Core Sub-Block Sampling (Zero-Bleed)
     if pitch is None or pitch <= 0:
         detected_pitch = GridDetector.estimate_pixel_pitch(clean_bg_img)
-        # Default to pitch 8 for authentic 32px pixel sprites if detected pitch is ambiguous
-        if detected_pitch < 4:
-            detected_pitch = 8
         print(f"  [2/5] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
     else:
         detected_pitch = pitch
         print(f"  [2/5] Using configured pixel block pitch: {detected_pitch}px")
 
-    print(f"        Applying True-Grid Mode Pooling ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch})...")
-    grid_img = GridDetector.feature_preserving_downsample(
+    margin = 1 if detected_pitch >= 6 else 0
+    print(f"        Sampling Core Sub-Block ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch}, Margin: {margin}px)...")
+    grid_img = GridDetector.core_subblock_downsample(
         clean_bg_img,
         pitch=detected_pitch,
-        outline_boost=2.0,
-        contrast_boost=1.4
+        margin=margin
     )
 
-    # 3. Clean orphan pixels & Strict Color Ramp Consolidation
+    # 3. Clean orphan pixels & Semantic Palette Quantization
     if clean_orphans:
         grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
 
-    print(f"  [3/5] Consolidating color ramps (Palette: '{palette_name}', Max Colors: {max_colors})...")
+    print(f"  [3/5] Applying Chroma-Weighted Semantic Quantization (Palette: '{palette_name}', Max Colors: {max_colors})...")
     palette_colors: List[str] = []
 
-    if palette_name.startswith("snapper") or palette_name == "default":
-        # Snapper-style adaptive ramp consolidation with 1px pure black outline
-        grid_img, palette_colors = PixelPosterizer.consolidate_color_ramps(
-            grid_img,
-            max_colors=max_colors,
-            enforce_black_outline=True,
-            outline_lum_thresh=45.0,
-            flat_median_passes=1
-        )
-    elif palette_name.startswith("adaptive-"):
-        n_c = int(palette_name.split("-")[1])
-        grid_img, palette_colors = PixelPosterizer.consolidate_color_ramps(
+    if palette_name.startswith("snapper") or palette_name == "default" or palette_name.startswith("adaptive"):
+        n_c = int(palette_name.split("-")[1]) if "-" in palette_name else max_colors
+        grid_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
             grid_img,
             max_colors=n_c,
-            enforce_black_outline=True,
-            outline_lum_thresh=45.0,
-            flat_median_passes=1
+            w_chroma=2.0
         )
     elif palette_name in PALETTES:
-        # First consolidate into discrete steps to remove continuous gradient noise
-        grid_img, _ = PixelPosterizer.consolidate_color_ramps(
+        hex_list = PALETTES[palette_name]
+        # Always include black outline if not present
+        if "#000000" not in hex_list and "#000000" not in [h.lower() for h in hex_list]:
+            hex_list = ["#000000"] + hex_list
+        palette_rgb = np.array([hex_to_rgb(h) for h in hex_list], dtype=np.uint8)
+        grid_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
             grid_img,
-            max_colors=max_colors,
-            enforce_black_outline=False,
-            flat_median_passes=1
+            palette_rgb=palette_rgb,
+            w_chroma=2.0
         )
-        quantizer = PaletteQuantizer(palette_name=palette_name)
-        grid_img = quantizer.quantize(grid_img)
-        palette_colors = quantizer.get_colors_hex()
     else:
-        # Raw grid
         pass
 
     # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames)
@@ -187,15 +173,15 @@ def main_cli(args: Optional[List[str]] = None) -> int:
     parser.add_argument("-P", "--pitch", type=int, default=8, help="Pixel block pitch (default: 8 for 32px retro, 4 for 64px RPG, 0 for auto).")
     parser.add_argument("-c", "--cell-size", type=str, default="auto", help="Logical cell size WxH (default: auto).")
     parser.add_argument("-s", "--scale", type=int, default=4, help="Nearest-neighbor integer upscale factor (default: 4).")
-    parser.add_argument("-p", "--palette", type=str, default="snapper-14",
+    parser.add_argument("-p", "--palette", type=str, default="snapper-13",
                         choices=[
-                            "snapper-14", "dawnbringer-16", "sweetie-16", "pico-8", "nes-54",
+                            "snapper-13", "snapper-16", "dawnbringer-16", "sweetie-16", "pico-8", "nes-54",
                             "gameboy-classic", "gameboy-pocket", "gameboy-color", "snes-classic",
                             "sega-genesis", "c64-commodore", "endesga-32", "endesga-64", "resurrect-64",
                             "adaptive-8", "adaptive-12", "adaptive-16", "adaptive-24", "adaptive-32", "none"
                         ],
-                        help="Palette preset (default: snapper-14 for ultra-clean 14-color retro).")
-    parser.add_argument("-k", "--max-colors", type=int, default=14, help="Maximum discrete colors per character (default: 14).")
+                        help="Palette preset (default: snapper-13 for 13-color clean retro).")
+    parser.add_argument("-k", "--max-colors", type=int, default=13, help="Maximum discrete colors per character (default: 13).")
     parser.add_argument("--no-remove-bg", action="store_true", help="Skip AI background removal.")
     parser.add_argument("--no-clean", action="store_true", help="Skip 1-pixel orphan noise cleanup.")
     parser.add_argument("--split-frames", action="store_true", help="Also export individual sliced frame PNG files.")

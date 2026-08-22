@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pixel scale auto-detection and Feature-Preserving True-Grid Downsampler."""
+"""Pixel scale auto-detection and Core-Subblock Sampling Downsampler (Zero-Bleed)."""
 
 from typing import Tuple, Optional
 import numpy as np
@@ -9,11 +9,11 @@ from PIL import Image
 
 
 class GridDetector:
-    """Detects pseudo-pixel pitch and normalizes images into strict 1:1 integer pixel grids with feature preservation."""
+    """Detects pseudo-pixel pitch and normalizes images into strict 1:1 integer pixel grids."""
 
     @staticmethod
-    def estimate_pixel_pitch(img: Image.Image, min_pitch: int = 3, max_pitch: int = 16) -> int:
-        """Estimate the optimal pseudo-pixel block pitch (in raw pixels) using edge autocorrelation."""
+    def estimate_pixel_pitch(img: Image.Image, min_pitch: int = 4, max_pitch: int = 16) -> int:
+        """Estimate the pseudo-pixel block pitch (in raw pixels) using edge autocorrelation."""
         gray = np.array(img.convert("L"))
         h, w = gray.shape
 
@@ -33,28 +33,25 @@ class GridDetector:
                 candidates.append((lag, float(ac_x[lag])))
 
         if candidates:
-            # Sort by score
             candidates.sort(key=lambda c: c[1], reverse=True)
-            # Default to 4px for high-detail pixel characters if peak is found near 4 or 8
             for p, score in candidates:
-                if p == 4 or (p % 4 == 0 and p <= 8):
+                if p == 8 or p == 4:
                     return p
             return int(candidates[0][0])
 
-        return 4  # Standard default for high-detail 48x64 / 64x64 pixel sprites
+        return 8  # Standard default for 32x32 retro pixel sprites
 
     @staticmethod
-    def feature_preserving_downsample(
+    def core_subblock_downsample(
         img: Image.Image,
-        pitch: int,
-        alpha_threshold: float = 0.20,
-        outline_boost: float = 2.2,
-        contrast_boost: float = 1.5
+        pitch: int = 8,
+        margin: int = 1,
+        alpha_threshold: float = 0.25
     ) -> Image.Image:
-        """Downsample sprite sheet using Saliency-Weighted Mode Pooling.
+        """Downsample image by sampling the pure core sub-region of each PxP block.
         
-        Preserves thin 1px dark outlines, eye pupils, eye whites, highlights,
-        and fine clothing trims from being swallowed by flat skin/hair background areas.
+        Sampling the inner (P - 2*margin) sub-region avoids boundary anti-aliasing
+        and eliminates color bleeding between adjacent blocks.
         """
         if pitch <= 1:
             return img.copy()
@@ -66,15 +63,13 @@ class GridDetector:
         target_h = max(1, h // pitch)
 
         mode_arr = np.zeros((target_h, target_w, 4), dtype=np.uint8)
-        block_area = pitch * pitch
-        min_opaque_count = max(1, int(block_area * alpha_threshold))
 
         for y in range(target_h):
-            y_start = y * pitch
-            y_end = min(h, (y + 1) * pitch)
+            y_start = y * pitch + margin
+            y_end = max(y_start + 1, (y + 1) * pitch - margin)
             for x in range(target_w):
-                x_start = x * pitch
-                x_end = min(w, (x + 1) * pitch)
+                x_start = x * pitch + margin
+                x_end = max(x_start + 1, (x + 1) * pitch - margin)
 
                 block = arr[y_start:y_end, x_start:x_end]
                 if block.size == 0:
@@ -83,31 +78,14 @@ class GridDetector:
                 opaque_mask = block[:, :, 3] > 0
                 opaque_count = np.sum(opaque_mask)
 
-                if opaque_count >= min_opaque_count:
+                if opaque_count >= max(1, (block.shape[0] * block.shape[1]) * alpha_threshold):
                     fg_pixels = block[opaque_mask]
-                    unique_colors, counts = np.unique(fg_pixels, axis=0, return_counts=True)
-
-                    # Calculate saliency weights for each unique color in block
-                    weights = counts.astype(float)
-                    for i, c in enumerate(unique_colors):
-                        r, g, b = float(c[0]), float(c[1]), float(c[2])
-                        lum = 0.299 * r + 0.587 * g + 0.114 * b
-
-                        # 1. Outline boost: dark lines (L < 55) must be preserved
-                        if lum < 55:
-                            weights[i] *= outline_boost
-
-                        # 2. Chromatic / Contrast boost: vivid features (pupil, lips, gems, highlights)
-                        chroma = max(r, g, b) - min(r, g, b)
-                        if chroma > 50:
-                            weights[i] *= contrast_boost
-
-                    best_idx = np.argmax(weights)
-                    mode_color = unique_colors[best_idx]
-                    mode_arr[y, x] = mode_color
-                    mode_arr[y, x, 3] = 255  # Strict binary solid alpha
+                    # Compute mean color of the clean core sub-block
+                    mean_color = fg_pixels.mean(axis=0).astype(np.uint8)
+                    mode_arr[y, x] = mean_color
+                    mode_arr[y, x, 3] = 255
                 else:
-                    mode_arr[y, x] = [0, 0, 0, 0]  # Fully transparent
+                    mode_arr[y, x] = [0, 0, 0, 0]
 
         return Image.fromarray(mode_arr, "RGBA")
 

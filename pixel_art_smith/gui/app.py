@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Strict Ramp Consolidation."""
+"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Chroma-Weighted Quantization."""
 
 import os
 import sys
@@ -8,6 +8,7 @@ import threading
 import json
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
+import numpy as np
 from PIL import Image, ImageTk, ImageDraw
 
 try:
@@ -87,7 +88,7 @@ class PixelArtSmithApp:
         self.btn_open.pack(padx=15, pady=(0, 12), fill="x")
 
         # Resolution Preset
-        self._create_label("Resolution / Sprite Size Preset:")
+        self._create_label("Resolution Preset:")
         res_options = [
             "Retro Snapper (32x32px - Pitch 8px)",
             "High-Detail RPG (64x64px - Pitch 4px)",
@@ -103,7 +104,7 @@ class PixelArtSmithApp:
         # Palette Selector
         self._create_label("Color Palette & Ramp Mode:")
         palette_options = [
-            "snapper-14 (Clean 14-Color Flat Ramps)",
+            "snapper-13 (Clean 13-Color Semantic Ramps)",
             "endesga-32 (Fantasy RPG)",
             "dawnbringer-16 (Compact DB16)",
             "pico-8 (16-Color Retro)",
@@ -118,8 +119,7 @@ class PixelArtSmithApp:
             "endesga-64 (Rich RPG)",
             "adaptive-12 (K-Means 12)",
             "adaptive-16 (K-Means 16)",
-            "adaptive-24 (K-Means 24)",
-            "none (Raw True-Grid Only)"
+            "none (Raw Grid Only)"
         ]
         self.var_palette_display = tk.StringVar(value=palette_options[0])
         if GUI_BACKEND == "customtkinter":
@@ -130,7 +130,7 @@ class PixelArtSmithApp:
 
         # Max Discrete Colors Slider (Posterization)
         self._create_label("Max Colors per Character (10~16):")
-        self.var_max_colors = tk.IntVar(value=14)
+        self.var_max_colors = tk.IntVar(value=13)
         if GUI_BACKEND == "customtkinter":
             self.slider_colors = ctk.CTkSlider(self.sidebar, from_=8, to=24, number_of_steps=16, variable=self.var_max_colors)
             self.lbl_colors_val = ctk.CTkLabel(self.sidebar, textvariable=self.var_max_colors)
@@ -152,21 +152,17 @@ class PixelArtSmithApp:
 
         # Toggles
         self.var_remove_bg = tk.BooleanVar(value=True)
-        self.var_solid_outline = tk.BooleanVar(value=True)
         self.var_clean = tk.BooleanVar(value=True)
 
         if GUI_BACKEND == "customtkinter":
             self.chk_bg = ctk.CTkCheckBox(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg)
-            self.chk_outline = ctk.CTkCheckBox(self.sidebar, text="Solid 1px Black Outline", variable=self.var_solid_outline)
             self.chk_clean = ctk.CTkCheckBox(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean)
         else:
             self.chk_bg = tk.Checkbutton(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg, bg="#242424", fg="white", selectcolor="#444")
-            self.chk_outline = tk.Checkbutton(self.sidebar, text="Solid 1px Black Outline", variable=self.var_solid_outline, bg="#242424", fg="white", selectcolor="#444")
             self.chk_clean = tk.Checkbutton(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean, bg="#242424", fg="white", selectcolor="#444")
 
-        self.chk_bg.pack(padx=15, pady=3, anchor="w")
-        self.chk_outline.pack(padx=15, pady=3, anchor="w")
-        self.chk_clean.pack(padx=15, pady=3, anchor="w")
+        self.chk_bg.pack(padx=15, pady=4, anchor="w")
+        self.chk_clean.pack(padx=15, pady=4, anchor="w")
 
         # Action Buttons
         if GUI_BACKEND == "customtkinter":
@@ -212,10 +208,10 @@ class PixelArtSmithApp:
 
         if GUI_BACKEND == "customtkinter":
             lbl_orig = ctk.CTkLabel(self.tab_compare, text="Original AI Sprite Sheet", font=ctk.CTkFont(size=13, weight="bold"))
-            lbl_proc = ctk.CTkLabel(self.tab_compare, text="True-Grid Matrix Pixel Art (Consolidated)", font=ctk.CTkFont(size=13, weight="bold"))
+            lbl_proc = ctk.CTkLabel(self.tab_compare, text="True-Grid Matrix Pixel Art (Semantic)", font=ctk.CTkFont(size=13, weight="bold"))
         else:
             lbl_orig = tk.Label(self.tab_compare, text="Original AI Sprite Sheet", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
-            lbl_proc = tk.Label(self.tab_compare, text="True-Grid Matrix Pixel Art (Consolidated)", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
+            lbl_proc = tk.Label(self.tab_compare, text="True-Grid Matrix Pixel Art (Semantic)", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
 
         lbl_orig.grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
         lbl_proc.grid(row=0, column=1, padx=8, pady=(6, 2), sticky="w")
@@ -312,63 +308,57 @@ class PixelArtSmithApp:
 
         def task():
             try:
-                # 1. Configuration parameters
                 palette_name = self._get_selected_palette_name()
                 scale_str = self.var_scale.get()
                 scale = int(scale_str[0]) if scale_str[0].isdigit() else 4
                 remove_bg = self.var_remove_bg.get()
-                solid_outline = self.var_solid_outline.get()
                 clean_orphans = self.var_clean.get()
                 max_colors = self.var_max_colors.get()
                 pitch = self._get_pitch_from_res_preset()
 
-                # 2. Background removal
+                # 1. Background removal
                 if remove_bg:
                     clean_bg_img = self.bg_remover.remove_background(self.raw_image, alpha_threshold=128, defringe=True)
                 else:
                     clean_bg_img = PixelCleaner.cleanup_transparency_halos(self.raw_image)
 
-                # 3. True-Grid Downsampling
-                grid_img = GridDetector.feature_preserving_downsample(
+                # 2. Core sub-block sampling (zero-bleed)
+                margin = 1 if pitch >= 6 else 0
+                grid_img = GridDetector.core_subblock_downsample(
                     clean_bg_img,
                     pitch=pitch,
-                    outline_boost=2.0,
-                    contrast_boost=1.4
+                    margin=margin
                 )
 
-                # 4. Clean orphan pixels
+                # 3. Clean orphan pixels
                 if clean_orphans:
                     grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
 
-                # 5. Strict Ramp Consolidation & Palette Snapping
+                # 4. Chroma-Weighted Semantic Quantization
                 palette_colors: List[str] = []
-                if palette_name.startswith("snapper") or palette_name.startswith("adaptive-"):
-                    grid_img, palette_colors = PixelPosterizer.consolidate_color_ramps(
+                if palette_name.startswith("snapper") or palette_name.startswith("adaptive"):
+                    grid_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
                         grid_img,
                         max_colors=max_colors,
-                        enforce_black_outline=solid_outline,
-                        outline_lum_thresh=45.0,
-                        flat_median_passes=1
+                        w_chroma=2.0
                     )
                 elif palette_name in PALETTES:
-                    grid_img, _ = PixelPosterizer.consolidate_color_ramps(
+                    hex_list = PALETTES[palette_name]
+                    if "#000000" not in hex_list and "#000000" not in [h.lower() for h in hex_list]:
+                        hex_list = ["#000000"] + hex_list
+                    palette_rgb = np.array([hex_to_rgb(h) for h in hex_list], dtype=np.uint8)
+                    grid_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
                         grid_img,
-                        max_colors=max_colors,
-                        enforce_black_outline=False,
-                        flat_median_passes=1
+                        palette_rgb=palette_rgb,
+                        w_chroma=2.0
                     )
-                    quantizer = PaletteQuantizer(palette_name=palette_name)
-                    grid_img = quantizer.quantize(grid_img)
-                    palette_colors = quantizer.get_colors_hex()
 
-                # 6. 2D Matrix isolation
+                # 5. 2D Matrix isolation
                 isolator = SpriteIsolator(min_area=12, padding=1)
                 matrix = isolator.isolate_matrix(grid_img)
 
-                # Optimal cell size
                 cell_size = SpritePacker.calculate_optimal_cell_size(matrix)
 
-                # Pack matrix sheet
                 packed_sheet, meta, std_grid = SpritePacker.pack_matrix_sheet(
                     matrix=matrix,
                     cell_size=cell_size,
@@ -392,7 +382,6 @@ class PixelArtSmithApp:
         if self.processed_sheet:
             self._show_on_canvas(self.canvas_proc, self.processed_sheet)
 
-        # Update motion selector dropdown for animation player
         motion_options = [f"Motion Row {i} ({len(self.std_grid[i])} frames)" for i in range(len(self.std_grid))]
         if motion_options:
             if GUI_BACKEND == "customtkinter":
@@ -475,7 +464,6 @@ class PixelArtSmithApp:
         out_path = Path(out_path)
         self.processed_sheet.save(out_path)
 
-        # Save metadata JSON adjacent
         meta_path = out_path.with_suffix(".json")
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, indent=2)
