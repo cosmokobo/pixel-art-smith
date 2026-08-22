@@ -52,11 +52,11 @@ class SpritePacker:
 
     @staticmethod
     def resolve_cell_size(matrix: list[list[FrameItem]], grid_mode: str = "auto-fit") -> tuple[int, int]:
-        """Resolve cell size based on grid mode ('auto-fit', 'fixed-32', 'fixed-48', 'fixed-64', or 'fixed-WxH')."""
+        """Resolve cell size based on grid mode."""
         mode = grid_mode.lower().strip()
         if mode in ("auto-fit", "auto", "fit", "none", "0"):
             return SpritePacker.calculate_optimal_cell_size(matrix)
-        elif mode in ("fixed-32", "32", "32x32"):
+        elif mode in ("preserve-sheet", "snapper", "original") or mode in ("fixed-32", "32", "32x32"):
             return 32, 32
         elif mode in ("fixed-48", "48", "48x48"):
             return 48, 48
@@ -73,7 +73,7 @@ class SpritePacker:
     @staticmethod
     def pack_matrix_sheet(
         matrix: list[list[FrameItem]],
-        cell_size: tuple[int, int],
+        cell_size: tuple[int, int] | None = None,
         scale: int = 1,
         palette_name: str = "snapper-13",
         palette_colors: list[str] | None = None,
@@ -84,6 +84,9 @@ class SpritePacker:
         Returns:
             (Packed_Sheet_Image, Agentic_Metadata_Dict, Standardized_Frame_Grid)
         """
+        if cell_size is None:
+            cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
+
         n_rows = len(matrix)
         max_cols = max(len(row) for row in matrix) if n_rows > 0 else 0
 

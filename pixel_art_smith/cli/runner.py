@@ -42,6 +42,8 @@ def process_single_image(
     clean_orphans: bool = True,
     export_frames: bool = False,
     bg_remover: BackgroundRemover | None = None,
+    expected_rows: int = 4,
+    expected_cols: int = 4,
 ) -> dict:
     """Execute full True-Grid post-processing pipeline on a sprite sheet with Semantic Palette Quantization."""
     print(f"\n[INFO] Processing: {input_path.name}")
@@ -49,12 +51,12 @@ def process_single_image(
 
     # 1. Background removal
     if remove_bg:
-        print("  [1/5] Removing background with AI matting & defringing...")
+        print("  [1/5] Removing background with FloodFill & defringing...")
         if bg_remover is None:
             bg_remover = BackgroundRemover()
-        clean_bg_img = bg_remover.remove_background(raw_img, alpha_threshold=128, defringe=True)
+        clean_bg_img = bg_remover.remove_background(raw_img, alpha_threshold=128, defringe=True, method="auto")
     else:
-        print("  [1/5] Skipping AI background removal (using existing alpha)...")
+        print("  [1/5] Skipping background removal (using existing alpha)...")
         clean_bg_img = PixelCleaner.cleanup_transparency_halos(raw_img)
 
     # 2. Pitch Detection & Core Sub-Block Sampling (Zero-Bleed)
@@ -96,9 +98,9 @@ def process_single_image(
         pass
 
     # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames)
-    print("  [4/5] Detecting 2D motion matrix (Rows=Motions, Cols=Frames)...")
+    print("  [4/5] Segmenting 2D motion matrix (Rows=Motions, Cols=Frames)...")
     isolator = SpriteIsolator(min_area=12, padding=1)
-    matrix = isolator.isolate_matrix(grid_img)
+    matrix = isolator.isolate_matrix(grid_img, expected_rows=expected_rows, expected_cols=expected_cols)
 
     n_rows = len(matrix)
     row_counts = [len(r) for r in matrix]
@@ -179,111 +181,83 @@ def main_cli(args: list[str] | None = None) -> int:
         "--grid-mode",
         type=str,
         default="auto-fit",
-        choices=["auto-fit", "fixed-32", "fixed-48", "fixed-64"],
-        help="Grid packaging mode: auto-fit (default), fixed-32 (32x32 standard), fixed-48, fixed-64.",
+        help="Grid layout mode: auto-fit (default), fixed-32, fixed-48, fixed-64, preserve-sheet, or WxH.",
     )
     parser.add_argument(
-        "-c", "--cell-size", type=str, default="auto", help="Override logical cell size WxH (default: auto)."
+        "-c", "--cell-size", type=str, default=None, help="Explicit cell size 'WxH' or 'N' (overrides --grid-mode)."
     )
     parser.add_argument(
-        "-s", "--scale", type=int, default=4, help="Nearest-neighbor integer upscale factor (default: 4)."
+        "-p", "--palette", type=str, default="snapper-13", help="Palette preset name (default: 'snapper-13')."
     )
     parser.add_argument(
-        "-p",
-        "--palette",
-        type=str,
-        default="snapper-13",
-        choices=[
-            "snapper-13",
-            "snapper-16",
-            "dawnbringer-16",
-            "sweetie-16",
-            "pico-8",
-            "nes-54",
-            "gameboy-classic",
-            "gameboy-pocket",
-            "gameboy-color",
-            "snes-classic",
-            "sega-genesis",
-            "c64-commodore",
-            "endesga-32",
-            "endesga-64",
-            "resurrect-64",
-            "adaptive-8",
-            "adaptive-12",
-            "adaptive-16",
-            "adaptive-24",
-            "adaptive-32",
-            "none",
-        ],
-        help="Palette preset (default: snapper-13 for 13-color clean retro).",
+        "-k", "--max-colors", type=int, default=13, help="Max discrete colors per character (default: 13)."
     )
-    parser.add_argument(
-        "-k", "--max-colors", type=int, default=13, help="Maximum discrete colors per character (default: 13)."
-    )
-    parser.add_argument("--no-remove-bg", action="store_true", help="Skip AI background removal.")
-    parser.add_argument("--no-clean", action="store_true", help="Skip 1-pixel orphan noise cleanup.")
-    parser.add_argument("--split-frames", action="store_true", help="Also export individual sliced frame PNG files.")
-    parser.add_argument("--model", type=str, default="isnet-general-use", help="Rembg AI model name.")
+    parser.add_argument("-s", "--scale", type=int, default=4, help="Integer upscale factor for display (default: 4).")
+    parser.add_argument("--no-bg-remove", action="store_true", help="Skip AI background removal.")
+    parser.add_argument("--no-clean", action="store_true", help="Skip orphan single-pixel cleanup.")
+    parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
 
     parsed = parser.parse_args(args)
 
-    input_target = Path(parsed.input)
-    if not input_target.exists():
-        print(f"[ERROR] Input target does not exist: {input_target}", file=sys.stderr)
+    input_path = Path(parsed.input)
+    if not input_path.exists():
+        print(f"[ERROR] Input path does not exist: {input_path}", file=sys.stderr)
         return 1
 
     output_dir = Path(parsed.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    explicit_cell = parse_cell_size(parsed.cell_size)
 
-    cell_size = parse_cell_size(parsed.cell_size)
-    bg_remover = BackgroundRemover(model_name=parsed.model) if not parsed.no_remove_bg else None
-
-    # Collect images (ignore sub-outputs or already processed sheets)
-    image_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-    if input_target.is_file():
-        files = [input_target]
+    # Collect images
+    if input_path.is_file():
+        image_files = [input_path]
     else:
-        files = [
-            p
-            for p in input_target.iterdir()
-            if p.is_file()
-            and p.suffix.lower() in image_exts
-            and not p.stem.endswith("_pixel_sheet")
-            and not p.stem.endswith("_true_grid")
-            and "snapper" not in p.stem.lower()
-        ]
+        exts = {".png", ".jpg", ".jpeg", ".webp"}
+        image_files = sorted(
+            [
+                p
+                for p in input_path.iterdir()
+                if p.is_file() and p.suffix.lower() in exts and "pixel_sheet" not in p.name
+            ]
+        )
 
-    if not files:
-        print(f"[WARN] No supported image files found in {input_target}", file=sys.stderr)
-        return 0
+    if not image_files:
+        print(f"[ERROR] No valid images found at: {input_path}", file=sys.stderr)
+        return 1
 
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
     print(
         f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x"
     )
-    print(f" Found {len(files)} image(s) to process.")
+    print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
 
-    for file_path in files:
-        process_single_image(
-            input_path=file_path,
-            output_dir=output_dir,
-            pitch=parsed.pitch,
-            cell_size=cell_size,
-            grid_mode=parsed.grid_mode,
-            scale=parsed.scale,
-            palette_name=parsed.palette,
-            max_colors=parsed.max_colors,
-            remove_bg=not parsed.no_remove_bg,
-            clean_orphans=not parsed.no_clean,
-            export_frames=parsed.split_frames,
-            bg_remover=bg_remover,
-        )
+    bg_remover = BackgroundRemover() if not parsed.no_bg_remove else None
+
+    success_count = 0
+    for img_p in image_files:
+        try:
+            res = process_single_image(
+                input_path=img_p,
+                output_dir=output_dir,
+                pitch=parsed.pitch,
+                cell_size=explicit_cell,
+                grid_mode=parsed.grid_mode,
+                scale=parsed.scale,
+                palette_name=parsed.palette,
+                max_colors=parsed.max_colors,
+                remove_bg=not parsed.no_bg_remove,
+                clean_orphans=not parsed.no_clean,
+                export_frames=parsed.export_frames,
+                bg_remover=bg_remover,
+            )
+            if res.get("status") == "success":
+                success_count += 1
+        except Exception as e:
+            print(f"[ERROR] Failed to process {img_p.name}: {e}", file=sys.stderr)
 
     print("\n[SUCCESS] All processing completed successfully!")
-    return 0
+    return 0 if success_count > 0 else 1
 
 
 if __name__ == "__main__":
