@@ -55,7 +55,7 @@ def process_single_image(
         print("  [1/5] Skipping AI background removal (using existing alpha)...")
         clean_bg_img = PixelCleaner.cleanup_transparency_halos(raw_img)
 
-    # 2. Pitch Detection & True-Grid Mode Pooling (Global Sheet)
+    # 2. Pitch Detection & Feature-Preserving True-Grid Downsampling (Global Sheet)
     if pitch is None or pitch <= 0:
         detected_pitch = GridDetector.estimate_pixel_pitch(clean_bg_img)
         print(f"  [2/5] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
@@ -63,8 +63,13 @@ def process_single_image(
         detected_pitch = pitch
         print(f"  [2/5] Using configured pixel block pitch: {detected_pitch}px")
 
-    print(f"        Applying True-Grid Mode Pooling ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch})...")
-    grid_img = GridDetector.mode_downsample_global(clean_bg_img, pitch=detected_pitch)
+    print(f"        Applying Feature-Preserving Mode Pooling ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch})...")
+    grid_img = GridDetector.feature_preserving_downsample(
+        clean_bg_img,
+        pitch=detected_pitch,
+        outline_boost=2.2,
+        contrast_boost=1.5
+    )
 
     # 3. Clean orphan pixels & palette snapping
     if clean_orphans:

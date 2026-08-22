@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pixel scale auto-detection and True-Grid Mode Pooling Downsampler."""
+"""Pixel scale auto-detection and Feature-Preserving True-Grid Downsampler."""
 
 from typing import Tuple, Optional
 import numpy as np
@@ -9,11 +9,11 @@ from PIL import Image
 
 
 class GridDetector:
-    """Detects pseudo-pixel pitch and normalizes images into strict 1:1 integer pixel grids."""
+    """Detects pseudo-pixel pitch and normalizes images into strict 1:1 integer pixel grids with feature preservation."""
 
     @staticmethod
-    def estimate_pixel_pitch(img: Image.Image, min_pitch: int = 4, max_pitch: int = 24) -> int:
-        """Estimate the pseudo-pixel block pitch (in raw pixels) using edge autocorrelation."""
+    def estimate_pixel_pitch(img: Image.Image, min_pitch: int = 3, max_pitch: int = 16) -> int:
+        """Estimate the optimal pseudo-pixel block pitch (in raw pixels) using edge autocorrelation."""
         gray = np.array(img.convert("L"))
         h, w = gray.shape
 
@@ -35,24 +35,26 @@ class GridDetector:
         if candidates:
             # Sort by score
             candidates.sort(key=lambda c: c[1], reverse=True)
-            best_pitch = candidates[0][0]
-            # If pitch is multiple of a smaller pitch (e.g. 16 instead of 8), check if 8 is also strong
+            # Default to 4px for high-detail pixel characters if peak is found near 4 or 8
             for p, score in candidates:
-                if p < best_pitch and best_pitch % p == 0 and score > 0.6 * candidates[0][1]:
-                    best_pitch = p
-            return int(best_pitch)
+                if p == 4 or (p % 4 == 0 and p <= 8):
+                    return p
+            return int(candidates[0][0])
 
-        return 8  # Standard default for 512/1024 SD pixel art
+        return 4  # Standard default for high-detail 48x64 / 64x64 pixel sprites
 
     @staticmethod
-    def mode_downsample_global(
+    def feature_preserving_downsample(
         img: Image.Image,
         pitch: int,
-        alpha_threshold: float = 0.25
+        alpha_threshold: float = 0.20,
+        outline_boost: float = 2.2,
+        contrast_boost: float = 1.5
     ) -> Image.Image:
-        """Downsample full sprite sheet using Mode (Majority Color) Pooling based on native pitch.
+        """Downsample sprite sheet using Saliency-Weighted Mode Pooling.
         
-        This maps each PxP pseudo-pixel block into exactly 1 logical pixel without color blurring or mixels.
+        Preserves thin 1px dark outlines, eye pupils, eye whites, highlights,
+        and fine clothing trims from being swallowed by flat skin/hair background areas.
         """
         if pitch <= 1:
             return img.copy()
@@ -83,11 +85,27 @@ class GridDetector:
 
                 if opaque_count >= min_opaque_count:
                     fg_pixels = block[opaque_mask]
-                    # Find mode (most frequent RGBA color)
                     unique_colors, counts = np.unique(fg_pixels, axis=0, return_counts=True)
-                    mode_color = unique_colors[np.argmax(counts)]
+
+                    # Calculate saliency weights for each unique color in block
+                    weights = counts.astype(float)
+                    for i, c in enumerate(unique_colors):
+                        r, g, b = float(c[0]), float(c[1]), float(c[2])
+                        lum = 0.299 * r + 0.587 * g + 0.114 * b
+
+                        # 1. Outline boost: dark lines (L < 55) must be preserved
+                        if lum < 55:
+                            weights[i] *= outline_boost
+
+                        # 2. Chromatic / Contrast boost: vivid features (pupil, lips, gems, highlights)
+                        chroma = max(r, g, b) - min(r, g, b)
+                        if chroma > 50:
+                            weights[i] *= contrast_boost
+
+                    best_idx = np.argmax(weights)
+                    mode_color = unique_colors[best_idx]
                     mode_arr[y, x] = mode_color
-                    mode_arr[y, x, 3] = 255  # Strict solid alpha
+                    mode_arr[y, x, 3] = 255  # Strict binary solid alpha
                 else:
                     mode_arr[y, x] = [0, 0, 0, 0]  # Fully transparent
 

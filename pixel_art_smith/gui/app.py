@@ -313,9 +313,14 @@ class PixelArtSmithApp:
                 else:
                     clean_bg_img = PixelCleaner.cleanup_transparency_halos(self.raw_image)
 
-                # 3. Pitch estimation & Mode Pooling
+                # 3. Pitch estimation & Feature-Preserving Mode Pooling
                 pitch = GridDetector.estimate_pixel_pitch(clean_bg_img) if auto_pitch else manual_pitch
-                grid_img = GridDetector.mode_downsample_global(clean_bg_img, pitch=pitch)
+                grid_img = GridDetector.feature_preserving_downsample(
+                    clean_bg_img,
+                    pitch=pitch,
+                    outline_boost=2.2,
+                    contrast_boost=1.5
+                )
 
                 # 4. Clean orphan pixels
                 if clean_orphans:
