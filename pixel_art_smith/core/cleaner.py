@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pixel art heuristic cleanup: orphan pixel removal and outline smoothing."""
+"""Pixel art heuristic cleanup: 8-connectivity non-destructive orphan pixel cleanup."""
 
 import cv2
 import numpy as np
@@ -7,27 +7,27 @@ from PIL import Image
 
 
 class PixelCleaner:
-    """Heuristic pixel art cleaner for removing single-pixel noise and jagged contours."""
+    """Safe pixel art cleaner that preserves thin diagonal hair strands, veil tips, and outlines."""
 
     @staticmethod
     def remove_orphan_pixels(img: Image.Image) -> Image.Image:
-        """Remove or absorb 1-pixel orphan dots that have zero orthogonal opaque neighbors."""
+        """Remove only truly isolated 1x1 noise pixels with zero neighbors in all 8 directions.
+
+        Preserves diagonal 1-pixel hair strands, pointed veil tips, and dagger edges.
+        """
         arr = np.array(img.convert("RGBA"))
         alpha = arr[:, :, 3]
-        h, w = alpha.shape
 
-        # Binary mask
         mask = (alpha > 0).astype(np.uint8)
 
-        # 4-connected kernel (orthogonal neighbors)
-        kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.uint8)
+        # Full 8-connected kernel (checks all orthogonal and diagonal neighbors)
+        kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
 
         neighbor_count = cv2.filter2D(mask, -1, kernel, borderType=cv2.BORDER_CONSTANT)
 
-        # Isolated pixel: mask == 1 but neighbor_count == 0
+        # Truly isolated dot: opaque (mask == 1) but has 0 neighbors in all 8 directions
         orphan_mask = (mask == 1) & (neighbor_count == 0)
 
-        # Clear orphan pixels to transparent
         arr[orphan_mask, 3] = 0
         return Image.fromarray(arr, "RGBA")
 

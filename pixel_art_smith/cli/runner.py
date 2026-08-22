@@ -6,10 +6,10 @@ import json
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
-from ..core.bg_remover import BackgroundRemover
 from ..core.cleaner import PixelCleaner
 from ..core.grid_detector import GridDetector
 from ..core.packer import SpritePacker
@@ -39,7 +39,7 @@ def process_single_image(
     palette_name: str = "snapper-16",
     max_colors: int = 16,
     remove_bg: bool = True,
-    clean_orphans: bool = True,
+    clean_orphans: bool = False,
     export_frames: bool = False,
     expected_rows: int = 4,
     expected_cols: int = 4,
@@ -48,7 +48,7 @@ def process_single_image(
     print(f"\n[INFO] Processing: {input_path.name}")
     raw_img = Image.open(input_path).convert("RGB")
 
-    # 1. Pitch Detection & Core Center-Subblock Sampling (Zero-Bleed, Preserves Full RGB)
+    # 1. Pitch Detection & Center-Subblock Downsampling (Zero-Bleed, 100% Full RGB Retention)
     if pitch is None or pitch <= 0:
         detected_pitch = GridDetector.estimate_pixel_pitch(raw_img)
         print(f"  [1/4] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
@@ -59,32 +59,65 @@ def process_single_image(
     grid_img = GridDetector.core_subblock_downsample(raw_img, pitch=detected_pitch)
     print(f"        Sampled Core Grid: {raw_img.width}x{raw_img.height} -> {grid_img.width}x{grid_img.height}")
 
-    # 2. Semantic Palette Quantization (KMeans / Palette Mapping matching Snapper)
+    grid_arr = np.array(grid_img)
+    target_h, target_w = grid_arr.shape[:2]
+
+    # 2. Strict Non-Leaking Spatial Background Segmentation (4-connected floodfill from corners)
+    if remove_bg:
+        print("  [2/4] Detecting background perimeter without leaking into character interior...")
+        mask = np.zeros((target_h + 2, target_w + 2), np.uint8)
+        bgr = cv2.cvtColor(grid_arr, cv2.COLOR_RGB2BGR)
+        flags = cv2.FLOODFILL_MASK_ONLY | (255 << 8) | 4  # 4-connectivity prevents diagonal leakage
+        diff = (5, 5, 5)
+
+        # 4 corners and borders
+        cv2.floodFill(bgr.copy(), mask, (0, 0), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (target_w - 1, 0), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (0, target_h - 1), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (target_w - 1, target_h - 1), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (target_w // 2, 0), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (target_w // 2, target_h - 1), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (0, target_h // 2), 255, diff, diff, flags=flags)
+        cv2.floodFill(bgr.copy(), mask, (target_w - 1, target_h // 2), 255, diff, diff, flags=flags)
+
+        bg_mask = mask[1 : target_h + 1, 1 : target_w + 1] == 255
+        fg_mask = ~bg_mask
+    else:
+        bg_mask = np.zeros((target_h, target_w), dtype=bool)
+        fg_mask = np.ones((target_h, target_w), dtype=bool)
+
+    # 3. Dedicated Foreground Semantic Palette Quantization (Full 16 Colors for Character)
     print(
-        f"  [2/4] Applying Chroma-Weighted Semantic Quantization (Palette: '{palette_name}', Max Colors: {max_colors})..."
+        f"  [3/4] Applying Chroma-Weighted Semantic Quantization (Palette: '{palette_name}', Max Colors: {max_colors})..."
     )
     palette_colors: list[str] = []
 
+    # Extract & quantize foreground
+    fg_img = Image.fromarray(grid_arr[fg_mask].reshape(-1, 1, 3))
     if palette_name.startswith("snapper") or palette_name in ("default", "adaptive", "none"):
         n_c = int(palette_name.split("-")[1]) if "-" in palette_name else max_colors
-        quant_img, palette_colors = PixelPosterizer.process_snapper_pipeline(grid_img, max_colors=n_c, w_chroma=2.0)
+        quant_fg_img, palette_colors = PixelPosterizer.process_snapper_pipeline(fg_img, max_colors=n_c, w_chroma=2.0)
     elif palette_name in PALETTES:
         hex_list = PALETTES[palette_name]
         if "#000000" not in hex_list and "#000000" not in [h.lower() for h in hex_list]:
             hex_list = ["#000000"] + hex_list
         palette_rgb = np.array([hex_to_rgb(h) for h in hex_list], dtype=np.uint8)
-        quant_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
-            grid_img, palette_rgb=palette_rgb, w_chroma=2.0
+        quant_fg_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
+            fg_img, palette_rgb=palette_rgb, w_chroma=2.0
         )
     else:
-        quant_img, palette_colors = PixelPosterizer.process_snapper_pipeline(grid_img, max_colors=max_colors)
+        quant_fg_img, palette_colors = PixelPosterizer.process_snapper_pipeline(fg_img, max_colors=max_colors)
 
-    # 3. Strict Non-Leaking Background Removal on Quantized Grid
-    if remove_bg:
-        print("  [3/4] Applying zero-leakage 4-connected background removal...")
-        clean_img = BackgroundRemover.remove_background_quantized(quant_img)
-    else:
-        clean_img = quant_img.convert("RGBA")
+    quant_fg_arr = np.array(quant_fg_img).reshape(-1, 3)
+
+    # Assemble final RGBA image
+    clean_arr = np.zeros((target_h, target_w, 4), dtype=np.uint8)
+    clean_arr[fg_mask, :3] = quant_fg_arr
+    clean_arr[fg_mask, 3] = 255
+    clean_arr[bg_mask, :3] = grid_arr[bg_mask]
+    clean_arr[bg_mask, 3] = 0 if remove_bg else 255
+
+    clean_img = Image.fromarray(clean_arr, "RGBA")
 
     if clean_orphans:
         clean_img = PixelCleaner.remove_orphan_pixels(clean_img)
@@ -181,7 +214,7 @@ def main_cli(args: list[str] | None = None) -> int:
     )
     parser.add_argument("-s", "--scale", type=int, default=4, help="Integer upscale factor for display (default: 4).")
     parser.add_argument("--no-bg-remove", action="store_true", help="Keep solid background without transparency.")
-    parser.add_argument("--no-clean", action="store_true", help="Skip orphan single-pixel cleanup.")
+    parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
     parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
 
     parsed = parser.parse_args(args)
@@ -228,7 +261,7 @@ def main_cli(args: list[str] | None = None) -> int:
                 palette_name=parsed.palette,
                 max_colors=parsed.max_colors,
                 remove_bg=not parsed.no_bg_remove,
-                clean_orphans=not parsed.no_clean,
+                clean_orphans=parsed.clean_orphans,
                 export_frames=parsed.export_frames,
             )
             if res.get("status") == "success":
