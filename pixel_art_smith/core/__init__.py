@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """PixelArtSmith Core Module."""
 
-from .palette import PALETTES, PaletteQuantizer, hex_to_rgb, rgb_to_hex
 from .bg_remover import BackgroundRemover
-from .grid_detector import GridDetector
-from .sprite_isolator import SpriteIsolator, FrameItem
 from .cleaner import PixelCleaner
+from .grid_detector import GridDetector
 from .packer import SpritePacker
+from .palette import PALETTES, PaletteQuantizer, hex_to_rgb, rgb_to_hex
 from .posterizer import PixelPosterizer
+from .sprite_isolator import FrameItem, SpriteIsolator
 
 __all__ = [
     "PALETTES",

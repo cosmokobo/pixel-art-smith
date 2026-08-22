@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """AI Background Removal, Hard Alpha Thresholding, and Edge Defringing."""
 
-from typing import Optional, Tuple
-import numpy as np
 import cv2
+import numpy as np
 from PIL import Image
-from rembg import remove, new_session
+from rembg import new_session, remove
 
 
 class BackgroundRemover:
@@ -26,11 +24,11 @@ class BackgroundRemover:
         img: Image.Image,
         alpha_threshold: int = 128,
         defringe: bool = True,
-        bg_color_hint: Optional[Tuple[int, int, int]] = (255, 255, 255)
+        bg_color_hint: tuple[int, int, int] | None = (255, 255, 255),
     ) -> Image.Image:
         """Remove background using AI matting, apply binary alpha, and defringe edge bleed."""
         rgba = img.convert("RGBA")
-        
+
         # 1. AI Matting using rembg
         session = self._get_session()
         matted = remove(
@@ -39,11 +37,10 @@ class BackgroundRemover:
             alpha_matting=True,
             alpha_matting_foreground_threshold=240,
             alpha_matting_background_threshold=15,
-            alpha_matting_erode_size=5
+            alpha_matting_erode_size=5,
         )
-        
+
         arr = np.array(matted)
-        rgb = arr[:, :, :3]
         alpha = arr[:, :, 3]
 
         # 2. Strict Binary Alpha Thresholding (0 or 255)
@@ -57,7 +54,7 @@ class BackgroundRemover:
         return Image.fromarray(arr, "RGBA")
 
     @staticmethod
-    def _defringe(arr: np.ndarray, bg_hint: Tuple[int, int, int], tolerance: int = 40) -> np.ndarray:
+    def _defringe(arr: np.ndarray, bg_hint: tuple[int, int, int], tolerance: int = 40) -> np.ndarray:
         """Decontaminate edge pixels where the background color bled into character outline."""
         rgb = arr[:, :, :3].astype(np.int32)
         alpha = arr[:, :, 3]

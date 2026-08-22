@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Sprite Frame Isolation, 2D Matrix (Row/Column) Clustering and Motion Structuring."""
 
-from typing import List, Tuple, Dict, Any, Optional
-import numpy as np
 import cv2
+import numpy as np
 from PIL import Image
 
 
 class FrameItem:
     """Represents a single isolated sprite frame."""
-    def __init__(self, image: Image.Image, bbox: Tuple[int, int, int, int], row: int = 0, col: int = 0):
+
+    def __init__(self, image: Image.Image, bbox: tuple[int, int, int, int], row: int = 0, col: int = 0):
         self.image = image
         self.bbox = bbox  # (x, y, w, h) in logical pixels
-        self.row = row    # Motion / Animation index
-        self.col = col    # Frame sequence index in motion
+        self.row = row  # Motion / Animation index
+        self.col = col  # Frame sequence index in motion
 
 
 class SpriteIsolator:
@@ -25,11 +24,8 @@ class SpriteIsolator:
         self.padding = padding
 
     def isolate_matrix(
-        self,
-        grid_img: Image.Image,
-        expected_rows: Optional[int] = None,
-        expected_cols: Optional[int] = None
-    ) -> List[List[FrameItem]]:
+        self, grid_img: Image.Image, expected_rows: int | None = None, expected_cols: int | None = None
+    ) -> list[list[FrameItem]]:
         """Isolate frames from a downsampled True-Grid image and cluster into Rows x Columns."""
         arr = np.array(grid_img.convert("RGBA"))
         alpha = arr[:, :, 3]
@@ -64,8 +60,8 @@ class SpriteIsolator:
         avg_h = sum(b[3] for b in raw_boxes) / len(raw_boxes)
         row_gap_threshold = max(4.0, avg_h * 0.45)
 
-        rows_clustered: List[List[Tuple[int, int, int, int]]] = []
-        current_row: List[Tuple[int, int, int, int]] = []
+        rows_clustered: list[list[tuple[int, int, int, int]]] = []
+        current_row: list[tuple[int, int, int, int]] = []
         current_y_center = None
 
         for b in raw_boxes:
@@ -87,12 +83,12 @@ class SpriteIsolator:
             rows_clustered.append(current_row)
 
         # Sort each row horizontally by X (left to right)
-        matrix: List[List[FrameItem]] = []
+        matrix: list[list[FrameItem]] = []
         for r_idx, row_boxes in enumerate(rows_clustered):
             row_boxes.sort(key=lambda b: b[0])
-            row_items: List[FrameItem] = []
+            row_items: list[FrameItem] = []
             for c_idx, (x, y, w, h) in enumerate(row_boxes):
-                crop_arr = arr[y:y+h, x:x+w]
+                crop_arr = arr[y : y + h, x : x + w]
                 crop_img = Image.fromarray(crop_arr, "RGBA")
                 item = FrameItem(crop_img, (x, y, w, h), row=r_idx, col=c_idx)
                 row_items.append(item)

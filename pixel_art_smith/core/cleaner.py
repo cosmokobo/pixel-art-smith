@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Pixel art heuristic cleanup: orphan pixel removal and outline smoothing."""
 
-import numpy as np
 import cv2
+import numpy as np
 from PIL import Image
 
 
@@ -21,9 +20,7 @@ class PixelCleaner:
         mask = (alpha > 0).astype(np.uint8)
 
         # 4-connected kernel (orthogonal neighbors)
-        kernel = np.array([[0, 1, 0],
-                           [1, 0, 1],
-                           [0, 1, 0]], dtype=np.uint8)
+        kernel = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.uint8)
 
         neighbor_count = cv2.filter2D(mask, -1, kernel, borderType=cv2.BORDER_CONSTANT)
 

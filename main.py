@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """PixelArtSmith - AI Sprite Sheet to Grid-Perfect Pixel Art Engine (GUI + CLI)."""
 
 import sys

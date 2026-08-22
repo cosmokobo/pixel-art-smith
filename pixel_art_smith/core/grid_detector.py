@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Pixel scale auto-detection and Core-Subblock Sampling Downsampler (Zero-Bleed)."""
 
-from typing import Tuple, Optional
 import numpy as np
-import cv2
 from PIL import Image
 
 
@@ -23,8 +20,8 @@ class GridDetector:
 
         # Autocorrelation
         norm_x = edge_x - np.mean(edge_x)
-        ac_x = np.correlate(norm_x, norm_x, mode='full')
-        ac_x = ac_x[len(norm_x) - 1:]
+        ac_x = np.correlate(norm_x, norm_x, mode="full")
+        ac_x = ac_x[len(norm_x) - 1 :]
 
         # Find local peaks in autocorrelation
         candidates = []
@@ -34,7 +31,7 @@ class GridDetector:
 
         if candidates:
             candidates.sort(key=lambda c: c[1], reverse=True)
-            for p, score in candidates:
+            for p, _score in candidates:
                 if p == 8 or p == 4:
                     return p
             return int(candidates[0][0])
@@ -43,13 +40,10 @@ class GridDetector:
 
     @staticmethod
     def core_subblock_downsample(
-        img: Image.Image,
-        pitch: int = 8,
-        margin: int = 1,
-        alpha_threshold: float = 0.25
+        img: Image.Image, pitch: int = 8, margin: int = 1, alpha_threshold: float = 0.25
     ) -> Image.Image:
         """Downsample image by sampling the pure core sub-region of each PxP block.
-        
+
         Sampling the inner (P - 2*margin) sub-region avoids boundary anti-aliasing
         and eliminates color bleeding between adjacent blocks.
         """

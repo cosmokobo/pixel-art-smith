@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Pure Semantic Palette Extraction & Chroma-Weighted CIELAB Quantization."""
 
-from typing import List, Tuple, Optional
-import numpy as np
 import cv2
+import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
 
@@ -14,10 +12,7 @@ class PixelPosterizer:
 
     @staticmethod
     def extract_semantic_palette(
-        img: Image.Image,
-        max_colors: int = 13,
-        white_hex: str = "#ececec",
-        black_hex: str = "#000000"
+        img: Image.Image, max_colors: int = 13, white_hex: str = "#ececec", black_hex: str = "#000000"
     ) -> np.ndarray:
         """Extract a high-contrast semantic palette with dedicated Black outline, White highlight, and Material Medoids."""
         arr = np.array(img.convert("RGBA"))
@@ -34,9 +29,9 @@ class PixelPosterizer:
         fg_mask = (lums > 35) & (lums < 240)
         fg_pixels = pixels[fg_mask]
 
-        palette_list: List[List[int]] = [
-            [0, 0, 0],       # 0: Dedicated Pure Black Outline
-            [236, 236, 236]  # 1: Dedicated Pure White / Eye White / Highlight
+        palette_list: list[list[int]] = [
+            [0, 0, 0],  # 0: Dedicated Pure Black Outline
+            [236, 236, 236],  # 1: Dedicated Pure White / Eye White / Highlight
         ]
 
         n_interior = max(2, max_colors - 2)
@@ -62,19 +57,16 @@ class PixelPosterizer:
 
     @staticmethod
     def quantize_chroma_weighted(
-        img: Image.Image,
-        palette_rgb: np.ndarray,
-        w_chroma: float = 2.0,
-        outline_lum_thresh: float = 35.0
-    ) -> Tuple[Image.Image, List[str]]:
+        img: Image.Image, palette_rgb: np.ndarray, w_chroma: float = 2.0, outline_lum_thresh: float = 35.0
+    ) -> tuple[Image.Image, list[str]]:
         """Quantize image into the given palette using Chroma-Weighted CIELAB Delta-E.
-        
+
         Args:
             img: Downsampled RGBA Image.
             palette_rgb: Palette array of shape (N, 3).
             w_chroma: Weight on A & B color channels (higher = vivid saturated colors are preserved).
             outline_lum_thresh: Luminance threshold to snap directly to Black slot 0.
-            
+
         Returns:
             (Quantized_RGBA_Image, List_Of_Hex_Colors)
         """
@@ -112,10 +104,8 @@ class PixelPosterizer:
 
     @staticmethod
     def process_snapper_pipeline(
-        img: Image.Image,
-        max_colors: int = 13,
-        w_chroma: float = 2.0
-    ) -> Tuple[Image.Image, List[str]]:
+        img: Image.Image, max_colors: int = 13, w_chroma: float = 2.0
+    ) -> tuple[Image.Image, list[str]]:
         """Complete Snapper-style semantic color quantization pipeline."""
         palette_rgb = PixelPosterizer.extract_semantic_palette(img, max_colors=max_colors)
         return PixelPosterizer.quantize_chroma_weighted(img, palette_rgb, w_chroma=w_chroma)
