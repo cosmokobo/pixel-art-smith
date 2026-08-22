@@ -6,11 +6,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
-while [ "$REPO_ROOT" != "/" ] && [ ! -f "$REPO_ROOT/AGENTS.md" ] && [ ! -d "$REPO_ROOT/.git" ] && [ ! -f "$REPO_ROOT/.git" ]; do
+while [ "$REPO_ROOT" != "/" ] && [ ! -f "$REPO_ROOT/AGENTS.md" ]; do
     REPO_ROOT="$(dirname "$REPO_ROOT")"
 done
 
-if [ -f "$REPO_ROOT/AGENTS.md" ] || [ -f "$REPO_ROOT/.gitmodules" ]; then
+if [ -f "$REPO_ROOT/AGENTS.md" ]; then
     BUILD_ROOT="$REPO_ROOT/build/pixel-art-smith"
 else
     BUILD_ROOT="$SCRIPT_DIR/dist"

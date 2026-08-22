@@ -12,12 +12,11 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $RepoRoot = $ScriptDir
 while ($RepoRoot -ne [System.IO.Path]::GetPathRoot($RepoRoot) -and
-       -not (Test-Path (Join-Path $RepoRoot "AGENTS.md")) -and
-       -not (Test-Path (Join-Path $RepoRoot ".git"))) {
+       -not (Test-Path (Join-Path $RepoRoot "AGENTS.md"))) {
     $RepoRoot = Split-Path -Parent $RepoRoot
 }
 
-if ((Test-Path (Join-Path $RepoRoot "AGENTS.md")) -or (Test-Path (Join-Path $RepoRoot ".gitmodules"))) {
+if (Test-Path (Join-Path $RepoRoot "AGENTS.md")) {
     $BuildRoot = Join-Path $RepoRoot "build\pixel-art-smith"
 } else {
     $BuildRoot = Join-Path $ScriptDir "dist"
