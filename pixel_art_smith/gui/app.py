@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Modern Desktop GUI for PixelArtSmith."""
+"""Modern Desktop GUI Studio for PixelArtSmith with Animation Player & Multi-Palette Support."""
 
 import os
 import sys
 import threading
+import json
 from pathlib import Path
-from typing import Optional, List, Tuple
-from PIL import Image, ImageTk
+from typing import Optional, List, Tuple, Dict, Any
+from PIL import Image, ImageTk, ImageDraw
 
 try:
     import customtkinter as ctk
@@ -22,28 +23,34 @@ from tkinter import filedialog, messagebox
 
 from ..core.bg_remover import BackgroundRemover
 from ..core.grid_detector import GridDetector
-from ..core.sprite_isolator import SpriteIsolator
-from ..core.palette import PaletteQuantizer, PALETTES
+from ..core.sprite_isolator import SpriteIsolator, FrameItem
+from ..core.palette import PaletteQuantizer, PALETTES, hex_to_rgb
 from ..core.cleaner import PixelCleaner
 from ..core.packer import SpritePacker
 
 
 class PixelArtSmithApp:
-    """Desktop GUI Application for PixelArtSmith."""
+    """Desktop GUI Studio Application for PixelArtSmith."""
 
     def __init__(self, root):
         self.root = root
-        self.root.title("PixelArtSmith - SD Sprite Sheet to Grid-Perfect Pixel Art Studio")
-        self.root.geometry("1180x800")
-        self.root.minsize(960, 680)
+        self.root.title("🎨 PixelArtSmith Studio - True-Grid AI Pixel Art & Animation Lab")
+        self.root.geometry("1240x840")
+        self.root.minsize(1020, 720)
 
         # State
         self.current_image_path: Optional[Path] = None
         self.raw_image: Optional[Image.Image] = None
         self.processed_sheet: Optional[Image.Image] = None
-        self.processed_frames: List[Image.Image] = []
-        self.metadata: dict = {}
+        self.std_grid: List[List[Image.Image]] = []
+        self.metadata: Dict[str, Any] = {}
         self.bg_remover = BackgroundRemover()
+
+        # Animation Player State
+        self.anim_running = False
+        self.anim_motion_idx = 0
+        self.anim_frame_idx = 0
+        self.anim_timer_id = None
 
         # GUI Setup
         self._build_ui()
@@ -51,147 +58,219 @@ class PixelArtSmithApp:
     def _build_ui(self):
         # Configure grid
         self.root.grid_columnconfigure(0, weight=0)  # Sidebar
-        self.root.grid_columnconfigure(1, weight=1)  # Main display
+        self.root.grid_columnconfigure(1, weight=1)  # Main display tabs
         self.root.grid_rowconfigure(0, weight=1)
 
         # ---------------------------------------------------------------------
         # Left Control Sidebar
         # ---------------------------------------------------------------------
         if GUI_BACKEND == "customtkinter":
-            self.sidebar = ctk.CTkFrame(self.root, width=320, corner_radius=0)
+            self.sidebar = ctk.CTkScrollableFrame(self.root, width=320, corner_radius=0)
         else:
-            self.sidebar = tk.Frame(self.root, width=320, bg="#2b2b2b")
+            self.sidebar = tk.Frame(self.root, width=320, bg="#242424")
 
         self.sidebar.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
-        self.sidebar.grid_propagate(False)
 
         # Title
         if GUI_BACKEND == "customtkinter":
-            title_lbl = ctk.CTkLabel(self.sidebar, text="🎨 PixelArtSmith", font=ctk.CTkFont(size=20, weight="bold"))
+            title_lbl = ctk.CTkLabel(self.sidebar, text="🎨 PixelArtSmith Studio", font=ctk.CTkFont(size=18, weight="bold"))
         else:
-            title_lbl = tk.Label(self.sidebar, text="🎨 PixelArtSmith", font=("Helvetica", 16, "bold"), fg="white", bg="#2b2b2b")
-        title_lbl.pack(padx=20, pady=(20, 15), anchor="w")
+            title_lbl = tk.Label(self.sidebar, text="🎨 PixelArtSmith Studio", font=("Helvetica", 15, "bold"), fg="white", bg="#242424")
+        title_lbl.pack(padx=15, pady=(15, 10), anchor="w")
 
         # Open File Button
         if GUI_BACKEND == "customtkinter":
             self.btn_open = ctk.CTkButton(self.sidebar, text="📁 Open Sprite Image", command=self._on_open_file)
         else:
             self.btn_open = tk.Button(self.sidebar, text="📁 Open Sprite Image", command=self._on_open_file)
-        self.btn_open.pack(padx=20, pady=(0, 15), fill="x")
-
-        # Cell Width Slider
-        self._create_label("Logical Cell Width (px):")
-        self.var_cell_w = tk.IntVar(value=48)
-        if GUI_BACKEND == "customtkinter":
-            self.slider_w = ctk.CTkSlider(self.sidebar, from_=16, to=128, number_of_steps=14, variable=self.var_cell_w)
-            self.lbl_val_w = ctk.CTkLabel(self.sidebar, textvariable=self.var_cell_w)
-        else:
-            self.slider_w = tk.Scale(self.sidebar, from_=16, to=128, resolution=8, orient="horizontal", variable=self.var_cell_w, bg="#2b2b2b", fg="white")
-            self.lbl_val_w = tk.Label(self.sidebar, textvariable=self.var_cell_w, bg="#2b2b2b", fg="white")
-        self.slider_w.pack(padx=20, fill="x")
-        self.lbl_val_w.pack(padx=20, anchor="e")
-
-        # Cell Height Slider
-        self._create_label("Logical Cell Height (px):")
-        self.var_cell_h = tk.IntVar(value=64)
-        if GUI_BACKEND == "customtkinter":
-            self.slider_h = ctk.CTkSlider(self.sidebar, from_=16, to=128, number_of_steps=14, variable=self.var_cell_h)
-            self.lbl_val_h = ctk.CTkLabel(self.sidebar, textvariable=self.var_cell_h)
-        else:
-            self.slider_h = tk.Scale(self.sidebar, from_=16, to=128, resolution=8, orient="horizontal", variable=self.var_cell_h, bg="#2b2b2b", fg="white")
-            self.lbl_val_h = tk.Label(self.sidebar, textvariable=self.var_cell_h, bg="#2b2b2b", fg="white")
-        self.slider_h.pack(padx=20, fill="x")
-        self.lbl_val_h.pack(padx=20, anchor="e")
+        self.btn_open.pack(padx=15, pady=(0, 12), fill="x")
 
         # Palette Selector
-        self._create_label("Palette Snapping:")
-        palette_options = list(PALETTES.keys()) + ["adaptive-16", "adaptive-24", "adaptive-32", "none"]
-        self.var_palette = tk.StringVar(value="endesga-32")
+        self._create_label("Color Palette Preset:")
+        palette_options = [
+            "endesga-32 (Fantasy RPG)",
+            "endesga-64 (Rich RPG)",
+            "dawnbringer-32 (Classic DB32)",
+            "dawnbringer-16 (Compact DB16)",
+            "pico-8 (16-Color Retro)",
+            "resurrect-64 (High-Detail)",
+            "sweetie-16 (Pastel Vibrant)",
+            "nes-54 (Nintendo Famicom)",
+            "snes-classic (Super Nintendo)",
+            "sega-genesis (MegaDrive 64)",
+            "gameboy-classic (DMG-01 4-Color)",
+            "gameboy-pocket (Grayscale)",
+            "gameboy-color (GBC 32-Color)",
+            "c64-commodore (Commodore 16)",
+            "adaptive-16 (K-Means 16)",
+            "adaptive-24 (K-Means 24)",
+            "adaptive-32 (K-Means 32)",
+            "adaptive-64 (K-Means 64)",
+            "none (Raw True-Grid Only)"
+        ]
+        self.var_palette_display = tk.StringVar(value=palette_options[0])
         if GUI_BACKEND == "customtkinter":
-            self.opt_palette = ctk.CTkOptionMenu(self.sidebar, values=palette_options, variable=self.var_palette)
+            self.opt_palette = ctk.CTkOptionMenu(self.sidebar, values=palette_options, variable=self.var_palette_display)
         else:
-            self.opt_palette = ttk.Combobox(self.sidebar, values=palette_options, textvariable=self.var_palette, state="readonly")
-        self.opt_palette.pack(padx=20, pady=(0, 10), fill="x")
+            self.opt_palette = ttk.Combobox(self.sidebar, values=palette_options, textvariable=self.var_palette_display, state="readonly")
+        self.opt_palette.pack(padx=15, pady=(0, 8), fill="x")
+
+        # Pitch Auto-Detect vs Manual
+        self.var_auto_pitch = tk.BooleanVar(value=True)
+        self.var_pitch = tk.IntVar(value=8)
+
+        if GUI_BACKEND == "customtkinter":
+            self.chk_auto_pitch = ctk.CTkCheckBox(self.sidebar, text="Auto-Detect Pixel Pitch", variable=self.var_auto_pitch, command=self._toggle_pitch_slider)
+        else:
+            self.chk_auto_pitch = tk.Checkbutton(self.sidebar, text="Auto-Detect Pixel Pitch", variable=self.var_auto_pitch, bg="#242424", fg="white", selectcolor="#444")
+        self.chk_auto_pitch.pack(padx=15, pady=(4, 4), anchor="w")
+
+        self.lbl_pitch_title = self._create_label("Manual Pitch Override (px):")
+        if GUI_BACKEND == "customtkinter":
+            self.slider_pitch = ctk.CTkSlider(self.sidebar, from_=4, to=16, number_of_steps=6, variable=self.var_pitch)
+            self.lbl_pitch_val = ctk.CTkLabel(self.sidebar, textvariable=self.var_pitch)
+        else:
+            self.slider_pitch = tk.Scale(self.sidebar, from_=4, to=16, resolution=2, orient="horizontal", variable=self.var_pitch, bg="#242424", fg="white")
+            self.lbl_pitch_val = tk.Label(self.sidebar, textvariable=self.var_pitch, bg="#242424", fg="white")
+        self.slider_pitch.pack(padx=15, fill="x")
+        self.lbl_pitch_val.pack(padx=15, anchor="e")
 
         # Scale Factor
-        self._create_label("Upscale Multiplier (Nearest):")
-        scale_options = ["1x (Raw Grid)", "2x", "3x", "4x"]
-        self.var_scale = tk.StringVar(value="2x")
+        self._create_label("Export Scale (Nearest Neighbor):")
+        scale_options = ["1x (Raw 1:1 Grid)", "2x", "3x", "4x (Recommended)", "6x", "8x"]
+        self.var_scale = tk.StringVar(value="4x (Recommended)")
         if GUI_BACKEND == "customtkinter":
             self.opt_scale = ctk.CTkOptionMenu(self.sidebar, values=scale_options, variable=self.var_scale)
         else:
             self.opt_scale = ttk.Combobox(self.sidebar, values=scale_options, textvariable=self.var_scale, state="readonly")
-        self.opt_scale.pack(padx=20, pady=(0, 10), fill="x")
+        self.opt_scale.pack(padx=15, pady=(0, 8), fill="x")
 
-        # Checkboxes
+        # Toggles
         self.var_remove_bg = tk.BooleanVar(value=True)
         self.var_clean = tk.BooleanVar(value=True)
 
         if GUI_BACKEND == "customtkinter":
             self.chk_bg = ctk.CTkCheckBox(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg)
-            self.chk_clean = ctk.CTkCheckBox(self.sidebar, text="Clean 1px Orphan Noise", variable=self.var_clean)
+            self.chk_clean = ctk.CTkCheckBox(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean)
         else:
-            self.chk_bg = tk.Checkbutton(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg, bg="#2b2b2b", fg="white", selectcolor="#444")
-            self.chk_clean = tk.Checkbutton(self.sidebar, text="Clean 1px Orphan Noise", variable=self.var_clean, bg="#2b2b2b", fg="white", selectcolor="#444")
+            self.chk_bg = tk.Checkbutton(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg, bg="#242424", fg="white", selectcolor="#444")
+            self.chk_clean = tk.Checkbutton(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean, bg="#242424", fg="white", selectcolor="#444")
 
-        self.chk_bg.pack(padx=20, pady=5, anchor="w")
-        self.chk_clean.pack(padx=20, pady=5, anchor="w")
+        self.chk_bg.pack(padx=15, pady=4, anchor="w")
+        self.chk_clean.pack(padx=15, pady=4, anchor="w")
 
         # Action Buttons
         if GUI_BACKEND == "customtkinter":
-            self.btn_process = ctk.CTkButton(self.sidebar, text="⚡ Process & Preview", fg_color="#1f6aa5", command=self._on_process)
-            self.btn_export = ctk.CTkButton(self.sidebar, text="💾 Export Sprite Sheet", fg_color="#2e7d32", command=self._on_export)
+            self.btn_process = ctk.CTkButton(self.sidebar, text="⚡ Process True-Grid", fg_color="#1f6aa5", height=36, command=self._on_process)
+            self.btn_export = ctk.CTkButton(self.sidebar, text="💾 Export Sprite Sheet + Meta", fg_color="#2e7d32", height=36, command=self._on_export)
         else:
-            self.btn_process = tk.Button(self.sidebar, text="⚡ Process & Preview", bg="#1f6aa5", fg="white", command=self._on_process)
-            self.btn_export = tk.Button(self.sidebar, text="💾 Export Sprite Sheet", bg="#2e7d32", fg="white", command=self._on_export)
+            self.btn_process = tk.Button(self.sidebar, text="⚡ Process True-Grid", bg="#1f6aa5", fg="white", height=2, command=self._on_process)
+            self.btn_export = tk.Button(self.sidebar, text="💾 Export Sprite Sheet + Meta", bg="#2e7d32", fg="white", height=2, command=self._on_export)
 
-        self.btn_process.pack(padx=20, pady=(20, 10), fill="x")
-        self.btn_export.pack(padx=20, pady=5, fill="x")
+        self.btn_process.pack(padx=15, pady=(16, 8), fill="x")
+        self.btn_export.pack(padx=15, pady=4, fill="x")
 
-        # Status Label
+        # Status Box
         if GUI_BACKEND == "customtkinter":
-            self.lbl_status = ctk.CTkLabel(self.sidebar, text="Ready. Open an image to start.", wraplength=280)
+            self.lbl_status = ctk.CTkLabel(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=280)
         else:
-            self.lbl_status = tk.Label(self.sidebar, text="Ready. Open an image to start.", wraplength=280, bg="#2b2b2b", fg="#aaa")
-        self.lbl_status.pack(padx=20, pady=(15, 10), anchor="w")
+            self.lbl_status = tk.Label(self.sidebar, text="Ready. Open an AI sprite sheet to start.", wraplength=280, bg="#242424", fg="#aaa")
+        self.lbl_status.pack(padx=15, pady=(12, 10), anchor="w")
 
         # ---------------------------------------------------------------------
-        # Right Preview Area
+        # Right Preview Tabs (Comparison View / Animation Player)
         # ---------------------------------------------------------------------
         if GUI_BACKEND == "customtkinter":
-            self.main_frame = ctk.CTkFrame(self.root)
+            self.tabview = ctk.CTkTabview(self.root)
+            self.tabview.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+            self.tab_compare = self.tabview.add("🔍 Comparison View")
+            self.tab_anim = self.tabview.add("🎬 Live Animation Player")
         else:
-            self.main_frame = tk.Frame(self.root, bg="#1e1e1e")
+            self.tabview = ttk.Notebook(self.root)
+            self.tabview.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+            self.tab_compare = tk.Frame(self.tabview, bg="#1e1e1e")
+            self.tab_anim = tk.Frame(self.tabview, bg="#1e1e1e")
+            self.tabview.add(self.tab_compare, text="🔍 Comparison View")
+            self.tabview.add(self.tab_anim, text="🎬 Live Animation Player")
 
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=12, pady=12)
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_columnconfigure(1, weight=1)
-        self.main_frame.grid_rowconfigure(1, weight=1)
+        self._build_comparison_tab()
+        self._build_animation_tab()
+
+    def _build_comparison_tab(self):
+        self.tab_compare.grid_columnconfigure(0, weight=1)
+        self.tab_compare.grid_columnconfigure(1, weight=1)
+        self.tab_compare.grid_rowconfigure(1, weight=1)
 
         # Header labels
         if GUI_BACKEND == "customtkinter":
-            lbl_orig_title = ctk.CTkLabel(self.main_frame, text="Original Image", font=ctk.CTkFont(size=14, weight="bold"))
-            lbl_proc_title = ctk.CTkLabel(self.main_frame, text="Grid-Perfect Pixel Art Preview", font=ctk.CTkFont(size=14, weight="bold"))
+            lbl_orig = ctk.CTkLabel(self.tab_compare, text="Original AI Sprite Sheet", font=ctk.CTkFont(size=13, weight="bold"))
+            lbl_proc = ctk.CTkLabel(self.tab_compare, text="True-Grid Matrix Pixel Art", font=ctk.CTkFont(size=13, weight="bold"))
         else:
-            lbl_orig_title = tk.Label(self.main_frame, text="Original Image", font=("Helvetica", 12, "bold"), fg="white", bg="#1e1e1e")
-            lbl_proc_title = tk.Label(self.main_frame, text="Grid-Perfect Pixel Art Preview", font=("Helvetica", 12, "bold"), fg="white", bg="#1e1e1e")
+            lbl_orig = tk.Label(self.tab_compare, text="Original AI Sprite Sheet", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
+            lbl_proc = tk.Label(self.tab_compare, text="True-Grid Matrix Pixel Art", font=("Helvetica", 11, "bold"), fg="white", bg="#1e1e1e")
 
-        lbl_orig_title.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
-        lbl_proc_title.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="w")
+        lbl_orig.grid(row=0, column=0, padx=8, pady=(6, 2), sticky="w")
+        lbl_proc.grid(row=0, column=1, padx=8, pady=(6, 2), sticky="w")
 
-        # Canvases for side-by-side comparison
-        self.canvas_orig = tk.Canvas(self.main_frame, bg="#181818", highlightthickness=1, highlightbackground="#333")
-        self.canvas_proc = tk.Canvas(self.main_frame, bg="#181818", highlightthickness=1, highlightbackground="#333")
+        self.canvas_orig = tk.Canvas(self.tab_compare, bg="#141414", highlightthickness=1, highlightbackground="#333")
+        self.canvas_proc = tk.Canvas(self.tab_compare, bg="#141414", highlightthickness=1, highlightbackground="#333")
 
-        self.canvas_orig.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
-        self.canvas_proc.grid(row=1, column=1, sticky="nsew", padx=8, pady=8)
+        self.canvas_orig.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+        self.canvas_proc.grid(row=1, column=1, sticky="nsew", padx=6, pady=6)
+
+    def _build_animation_tab(self):
+        self.tab_anim.grid_columnconfigure(0, weight=1)
+        self.tab_anim.grid_rowconfigure(1, weight=1)
+
+        # Animation Controls Bar
+        if GUI_BACKEND == "customtkinter":
+            ctrl_bar = ctk.CTkFrame(self.tab_anim)
+        else:
+            ctrl_bar = tk.Frame(self.tab_anim, bg="#2a2a2a")
+        ctrl_bar.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
+
+        # Motion Dropdown
+        self.var_motion_select = tk.StringVar(value="Motion Row 0")
+        self.opt_motion = ctk.CTkOptionMenu(ctrl_bar, values=["Motion Row 0"], variable=self.var_motion_select, command=self._on_motion_change) if GUI_BACKEND == "customtkinter" else ttk.Combobox(ctrl_bar, values=["Motion Row 0"], textvariable=self.var_motion_select)
+        self.opt_motion.pack(side="left", padx=10, pady=6)
+
+        # FPS Slider
+        self.var_fps = tk.IntVar(value=6)
+        if GUI_BACKEND == "customtkinter":
+            lbl_fps = ctk.CTkLabel(ctrl_bar, text="FPS:")
+            self.slider_fps = ctk.CTkSlider(ctrl_bar, from_=1, to=16, number_of_steps=15, variable=self.var_fps, width=120)
+            self.lbl_fps_val = ctk.CTkLabel(ctrl_bar, textvariable=self.var_fps)
+        else:
+            lbl_fps = tk.Label(ctrl_bar, text="FPS:", bg="#2a2a2a", fg="white")
+            self.slider_fps = tk.Scale(ctrl_bar, from_=1, to=16, orient="horizontal", variable=self.var_fps, bg="#2a2a2a", fg="white")
+            self.lbl_fps_val = tk.Label(ctrl_bar, textvariable=self.var_fps, bg="#2a2a2a", fg="white")
+
+        lbl_fps.pack(side="left", padx=(15, 2))
+        self.slider_fps.pack(side="left", padx=4)
+        self.lbl_fps_val.pack(side="left", padx=4)
+
+        # Play / Pause Button
+        if GUI_BACKEND == "customtkinter":
+            self.btn_play = ctk.CTkButton(ctrl_bar, text="▶ Play Animation", width=120, command=self._toggle_animation)
+        else:
+            self.btn_play = tk.Button(ctrl_bar, text="▶ Play Animation", command=self._toggle_animation)
+        self.btn_play.pack(side="left", padx=15)
+
+        # Animation Display Canvas
+        self.canvas_anim = tk.Canvas(self.tab_anim, bg="#111111", highlightthickness=1, highlightbackground="#333")
+        self.canvas_anim.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
 
     def _create_label(self, text: str):
         if GUI_BACKEND == "customtkinter":
             lbl = ctk.CTkLabel(self.sidebar, text=text, font=ctk.CTkFont(size=12))
         else:
-            lbl = tk.Label(self.sidebar, text=text, bg="#2b2b2b", fg="#ddd", font=("Helvetica", 10))
-        lbl.pack(padx=20, pady=(8, 2), anchor="w")
+            lbl = tk.Label(self.sidebar, text=text, bg="#242424", fg="#ddd", font=("Helvetica", 10))
+        lbl.pack(padx=15, pady=(6, 2), anchor="w")
+        return lbl
+
+    def _toggle_pitch_slider(self):
+        # Optional pitch slider enable/disable
+        pass
 
     def _on_open_file(self):
         file_path = filedialog.askopenfilename(
@@ -205,85 +284,155 @@ class PixelArtSmithApp:
         self._show_on_canvas(self.canvas_orig, self.raw_image)
         self.lbl_status.configure(text=f"Loaded: {self.current_image_path.name}")
 
+    def _get_selected_palette_name(self) -> str:
+        raw_val = self.var_palette_display.get()
+        return raw_val.split()[0].lower()
+
     def _on_process(self):
         if self.raw_image is None:
             messagebox.showwarning("Warning", "Please open an image first.")
             return
 
-        self.lbl_status.configure(text="Processing... please wait.")
+        self.lbl_status.configure(text="Processing True-Grid... please wait.")
         self.btn_process.configure(state="disabled")
 
         def task():
             try:
-                cell_w = self.var_cell_w.get()
-                cell_h = self.var_cell_h.get()
+                # 1. Configuration parameters
+                palette_name = self._get_selected_palette_name()
                 scale_str = self.var_scale.get()
-                scale = int(scale_str[0]) if scale_str[0].isdigit() else 1
-                palette_name = self.var_palette.get()
+                scale = int(scale_str[0]) if scale_str[0].isdigit() else 2
                 remove_bg = self.var_remove_bg.get()
                 clean_orphans = self.var_clean.get()
+                auto_pitch = self.var_auto_pitch.get()
+                manual_pitch = self.var_pitch.get()
 
-                # Step 1: Remove background
+                # 2. Background removal
                 if remove_bg:
                     clean_bg_img = self.bg_remover.remove_background(self.raw_image, alpha_threshold=128, defringe=True)
                 else:
                     clean_bg_img = PixelCleaner.cleanup_transparency_halos(self.raw_image)
 
-                # Step 2: Detect frames
-                isolator = SpriteIsolator(min_area=300, padding=2)
-                detected = isolator.isolate_frames(clean_bg_img)
+                # 3. Pitch estimation & Mode Pooling
+                pitch = GridDetector.estimate_pixel_pitch(clean_bg_img) if auto_pitch else manual_pitch
+                grid_img = GridDetector.mode_downsample_global(clean_bg_img, pitch=pitch)
 
-                # Step 3: Quantizer setup
+                # 4. Clean orphan pixels
+                if clean_orphans:
+                    grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
+
+                # 5. Palette snapping
                 quantizer = None
+                palette_colors = []
                 if palette_name.startswith("adaptive-"):
                     n = int(palette_name.split("-")[1])
-                    colors = PaletteQuantizer.extract_adaptive_palette(clean_bg_img, n_colors=n)
-                    quantizer = PaletteQuantizer(custom_colors=colors)
+                    palette_colors = PaletteQuantizer.extract_adaptive_palette(grid_img, n_colors=n)
+                    quantizer = PaletteQuantizer(custom_colors=palette_colors)
                 elif palette_name in PALETTES:
                     quantizer = PaletteQuantizer(palette_name=palette_name)
+                    palette_colors = quantizer.get_colors_hex()
 
-                # Step 4: Process frames
-                processed = []
-                for frame_raw, bbox in detected:
-                    fw, fh = frame_raw.size
-                    ratio = min(cell_w / max(1, fw), cell_h / max(1, fh))
-                    lw = max(1, int(fw * ratio))
-                    lh = max(1, int(fh * ratio))
+                if quantizer:
+                    grid_img = quantizer.quantize(grid_img)
 
-                    grid_frame = GridDetector.downsample_to_grid(frame_raw, (lw, lh))
-                    if clean_orphans:
-                        grid_frame = PixelCleaner.remove_orphan_pixels(grid_frame)
-                    if quantizer:
-                        grid_frame = quantizer.quantize(grid_frame)
+                # 6. 2D Matrix isolation
+                isolator = SpriteIsolator(min_area=16, padding=1)
+                matrix = isolator.isolate_matrix(grid_img)
 
-                    std_frame = SpritePacker.standardize_frame(grid_frame, (cell_w, cell_h))
-                    if scale > 1:
-                        std_frame = GridDetector.upscale_nearest(std_frame, scale=scale)
-                    processed.append(std_frame)
+                # Optimal cell size
+                cell_size = SpritePacker.calculate_optimal_cell_size(matrix)
 
-                scaled_cell = (cell_w * scale, cell_h * scale)
-                packed_sheet, meta = SpritePacker.pack_horizontal_sheet(processed, scaled_cell)
+                # Pack matrix sheet
+                packed_sheet, meta, std_grid = SpritePacker.pack_matrix_sheet(
+                    matrix=matrix,
+                    cell_size=cell_size,
+                    scale=scale,
+                    palette_name=palette_name,
+                    palette_colors=palette_colors
+                )
 
                 self.processed_sheet = packed_sheet
-                self.processed_frames = processed
+                self.std_grid = std_grid
                 self.metadata = meta
 
-                self.root.after(0, lambda: self._on_process_finished(len(processed), scaled_cell))
+                self.root.after(0, lambda: self._on_process_finished(len(matrix), sum(len(r) for r in matrix), pitch, cell_size, scale))
             except Exception as ex:
                 self.root.after(0, lambda: self._on_process_error(str(ex)))
 
         threading.Thread(target=task, daemon=True).start()
 
-    def _on_process_finished(self, frame_count: int, scaled_cell: Tuple[int, int]):
+    def _on_process_finished(self, n_rows: int, total_frames: int, pitch: int, cell_size: Tuple[int, int], scale: int):
         self.btn_process.configure(state="normal")
         if self.processed_sheet:
             self._show_on_canvas(self.canvas_proc, self.processed_sheet)
-        self.lbl_status.configure(text=f"Done! {frame_count} frames ({scaled_cell[0]}x{scaled_cell[1]}).")
+
+        # Update motion selector dropdown for animation player
+        motion_options = [f"Motion Row {i} ({len(self.std_grid[i])} frames)" for i in range(len(self.std_grid))]
+        if motion_options:
+            if GUI_BACKEND == "customtkinter":
+                self.opt_motion.configure(values=motion_options)
+                self.var_motion_select.set(motion_options[0])
+            else:
+                self.opt_motion["values"] = motion_options
+                self.var_motion_select.set(motion_options[0])
+
+        self.lbl_status.configure(
+            text=f"Done! Pitch: {pitch}px | {n_rows} Motions ({total_frames} frames) | Cell: {cell_size[0]}x{cell_size[1]}px ({scale}x)"
+        )
 
     def _on_process_error(self, err_msg: str):
         self.btn_process.configure(state="normal")
         self.lbl_status.configure(text=f"Error: {err_msg}")
-        messagebox.showerror("Processing Error", f"Failed to process image:\n{err_msg}")
+        messagebox.showerror("Processing Error", f"Failed to process sprite sheet:\n{err_msg}")
+
+    def _on_motion_change(self, val: str):
+        # Parse selected motion index
+        try:
+            self.anim_motion_idx = int(val.split()[2])
+        except Exception:
+            self.anim_motion_idx = 0
+        self.anim_frame_idx = 0
+        self._render_current_anim_frame()
+
+    def _toggle_animation(self):
+        if not self.std_grid:
+            messagebox.showinfo("Notice", "Process an image first to preview animation.")
+            return
+
+        if self.anim_running:
+            self.anim_running = False
+            self.btn_play.configure(text="▶ Play Animation")
+            if self.anim_timer_id:
+                self.root.after_cancel(self.anim_timer_id)
+        else:
+            self.anim_running = True
+            self.btn_play.configure(text="⏸ Pause Animation")
+            self._anim_tick()
+
+    def _anim_tick(self):
+        if not self.anim_running or not self.std_grid:
+            return
+
+        current_row = self.std_grid[min(self.anim_motion_idx, len(self.std_grid) - 1)]
+        if not current_row:
+            return
+
+        self._render_current_anim_frame()
+        self.anim_frame_idx = (self.anim_frame_idx + 1) % len(current_row)
+
+        fps = max(1, self.var_fps.get())
+        interval_ms = int(1000 / fps)
+        self.anim_timer_id = self.root.after(interval_ms, self._anim_tick)
+
+    def _render_current_anim_frame(self):
+        if not self.std_grid:
+            return
+        current_row = self.std_grid[min(self.anim_motion_idx, len(self.std_grid) - 1)]
+        if not current_row:
+            return
+
+        frame = current_row[min(self.anim_frame_idx, len(current_row) - 1)]
+        self._show_on_canvas(self.canvas_anim, frame, scale_zoom=3.0)
 
     def _on_export(self):
         if self.processed_sheet is None:
@@ -303,30 +452,33 @@ class PixelArtSmithApp:
 
         # Save metadata JSON adjacent
         meta_path = out_path.with_suffix(".json")
-        import json
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, indent=2)
 
-        # Export individual frames folder
+        # Export individual motion frames folder
         frames_dir = out_path.parent / f"{out_path.stem}_frames"
         frames_dir.mkdir(exist_ok=True)
-        for i, frame in enumerate(self.processed_frames):
-            frame.save(frames_dir / f"frame_{i:02d}.png")
+        count = 0
+        for r_idx, row in enumerate(self.std_grid):
+            for c_idx, frame_img in enumerate(row):
+                frame_img.save(frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png")
+                count += 1
 
-        messagebox.showinfo("Export Success", f"Exported:\n- Sheet: {out_path.name}\n- Meta: {meta_path.name}\n- Frames: {frames_dir.name}/")
+        messagebox.showinfo(
+            "Export Success",
+            f"Successfully exported:\n- Matrix Sheet: {out_path.name}\n- Agentic Metadata: {meta_path.name}\n- {count} Frames: {frames_dir.name}/"
+        )
 
-    def _show_on_canvas(self, canvas: tk.Canvas, pil_img: Image.Image):
+    def _show_on_canvas(self, canvas: tk.Canvas, pil_img: Image.Image, scale_zoom: float = 1.0):
         canvas.update_idletasks()
         cw = max(100, canvas.winfo_width())
         ch = max(100, canvas.winfo_height())
 
-        # Fit with aspect ratio
         iw, ih = pil_img.size
-        ratio = min(cw / iw, ch / ih)
+        ratio = min(cw / iw, ch / ih) * scale_zoom
         disp_w = max(1, int(iw * ratio))
         disp_h = max(1, int(ih * ratio))
 
-        # Use nearest neighbor for crisp preview
         resized = pil_img.resize((disp_w, disp_h), resample=Image.Resampling.NEAREST)
         photo = ImageTk.PhotoImage(resized)
 

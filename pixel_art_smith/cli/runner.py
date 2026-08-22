@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Headless CLI Runner for PixelArtSmith."""
+"""Headless CLI Runner for PixelArtSmith with True-Grid Engine & Matrix Sheet Support."""
 
 import os
 import sys
@@ -12,14 +12,16 @@ from PIL import Image
 
 from ..core.bg_remover import BackgroundRemover
 from ..core.grid_detector import GridDetector
-from ..core.sprite_isolator import SpriteIsolator
+from ..core.sprite_isolator import SpriteIsolator, FrameItem
 from ..core.palette import PaletteQuantizer, PALETTES
 from ..core.cleaner import PixelCleaner
 from ..core.packer import SpritePacker
 
 
-def parse_cell_size(size_str: str) -> Tuple[int, int]:
-    """Parse 'WxH' or 'N' into (width, height)."""
+def parse_cell_size(size_str: Optional[str]) -> Optional[Tuple[int, int]]:
+    """Parse 'WxH' or 'N' into (width, height), or None for auto."""
+    if not size_str or size_str.lower() in ("auto", "none", "0"):
+        return None
     if 'x' in size_str.lower():
         parts = size_str.lower().split('x')
         return int(parts[0]), int(parts[1])
@@ -30,81 +32,86 @@ def parse_cell_size(size_str: str) -> Tuple[int, int]:
 def process_single_image(
     input_path: Path,
     output_dir: Path,
-    cell_size: Tuple[int, int] = (48, 64),
-    scale: int = 1,
+    pitch: Optional[int] = None,
+    cell_size: Optional[Tuple[int, int]] = None,
+    scale: int = 2,
     palette_name: str = "endesga-32",
     remove_bg: bool = True,
     clean_orphans: bool = True,
     export_frames: bool = True,
     bg_remover: Optional[BackgroundRemover] = None
 ) -> dict:
-    """Execute full 6-stage post-processing pipeline on a single sprite sheet image."""
+    """Execute full True-Grid post-processing pipeline on a sprite sheet."""
     print(f"\n[INFO] Processing: {input_path.name}")
     raw_img = Image.open(input_path).convert("RGBA")
 
     # 1. Background removal
     if remove_bg:
-        print("  [1/5] Removing background with AI matting...")
+        print("  [1/5] Removing background with AI matting & defringing...")
         if bg_remover is None:
             bg_remover = BackgroundRemover()
         clean_bg_img = bg_remover.remove_background(raw_img, alpha_threshold=128, defringe=True)
     else:
-        print("  [1/5] Skipping background removal (using raw alpha)...")
+        print("  [1/5] Skipping AI background removal (using existing alpha)...")
         clean_bg_img = PixelCleaner.cleanup_transparency_halos(raw_img)
 
-    # 2. Isolate character frames
-    print("  [2/5] Detecting character poses and isolating frames...")
-    isolator = SpriteIsolator(min_area=300, padding=2)
-    detected_frames = isolator.isolate_frames(clean_bg_img)
-    print(f"  --> Found {len(detected_frames)} character pose(s).")
+    # 2. Pitch Detection & True-Grid Mode Pooling (Global Sheet)
+    if pitch is None or pitch <= 0:
+        detected_pitch = GridDetector.estimate_pixel_pitch(clean_bg_img)
+        print(f"  [2/5] Auto-detected pseudo-pixel block pitch: {detected_pitch}px")
+    else:
+        detected_pitch = pitch
+        print(f"  [2/5] Using configured pixel block pitch: {detected_pitch}px")
 
-    # 3. Grid-Perfect Downsampling & Palette Quantization per frame
-    print(f"  [3/5] Applying Grid-Perfect downsampling to {cell_size[0]}x{cell_size[1]} and palette '{palette_name}'...")
-    
-    # Initialize Palette Quantizer
+    print(f"        Applying True-Grid Mode Pooling ({raw_img.width}x{raw_img.height} -> {raw_img.width // detected_pitch}x{raw_img.height // detected_pitch})...")
+    grid_img = GridDetector.mode_downsample_global(clean_bg_img, pitch=detected_pitch)
+
+    # 3. Clean orphan pixels & palette snapping
+    if clean_orphans:
+        grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
+
+    print(f"  [3/5] Applying CIELAB palette snapping: '{palette_name}'...")
     quantizer = None
+    palette_colors: List[str] = []
     if palette_name.startswith("adaptive-"):
         n_colors = int(palette_name.split("-")[1])
-        adaptive_colors = PaletteQuantizer.extract_adaptive_palette(clean_bg_img, n_colors=n_colors)
-        quantizer = PaletteQuantizer(custom_colors=adaptive_colors)
+        palette_colors = PaletteQuantizer.extract_adaptive_palette(grid_img, n_colors=n_colors)
+        quantizer = PaletteQuantizer(custom_colors=palette_colors)
     elif palette_name in PALETTES:
         quantizer = PaletteQuantizer(palette_name=palette_name)
+        palette_colors = quantizer.get_colors_hex()
 
-    processed_frames: List[Image.Image] = []
-    for i, (frame_raw, bbox) in enumerate(detected_frames):
-        # Determine target frame bounding size while maintaining aspect ratio
-        fw, fh = frame_raw.size
-        ratio = min(cell_size[0] / max(1, fw), cell_size[1] / max(1, fh))
-        logical_w = max(1, int(fw * ratio))
-        logical_h = max(1, int(fh * ratio))
+    if quantizer is not None:
+        grid_img = quantizer.quantize(grid_img)
 
-        # Downsample with Box filter (Box/Area eliminates mixels)
-        grid_frame = GridDetector.downsample_to_grid(frame_raw, (logical_w, logical_h))
+    # 4. 2D Matrix Slicing (Rows = Motions, Cols = Frames)
+    print("  [4/5] Detecting 2D motion matrix (Rows=Motions, Cols=Frames)...")
+    isolator = SpriteIsolator(min_area=16, padding=1)
+    matrix = isolator.isolate_matrix(grid_img)
 
-        # Clean orphan pixels
-        if clean_orphans:
-            grid_frame = PixelCleaner.remove_orphan_pixels(grid_frame)
+    n_rows = len(matrix)
+    row_counts = [len(r) for r in matrix]
+    total_frames = sum(row_counts)
+    print(f"  --> Identified {n_rows} motion row(s) with frames: {row_counts} (Total {total_frames} frames).")
 
-        # Apply palette snapping
-        if quantizer is not None:
-            grid_frame = quantizer.quantize(grid_frame)
+    # Determine standardized cell size
+    if cell_size is None:
+        final_cell_size = SpritePacker.calculate_optimal_cell_size(matrix)
+        print(f"        Auto-calculated logical cell size: {final_cell_size[0]}x{final_cell_size[1]}px")
+    else:
+        final_cell_size = cell_size
+        print(f"        Using explicit logical cell size: {final_cell_size[0]}x{final_cell_size[1]}px")
 
-        # Standardize frame canvas (bottom-center anchor)
-        std_frame = SpritePacker.standardize_frame(grid_frame, cell_size)
+    # 5. Pack Matrix Sprite Sheet & Export
+    print(f"  [5/5] Assembling Matrix Sprite Sheet (Scale: {scale}x)...")
+    packed_sheet, metadata, std_grid = SpritePacker.pack_matrix_sheet(
+        matrix=matrix,
+        cell_size=final_cell_size,
+        scale=scale,
+        palette_name=palette_name,
+        palette_colors=palette_colors
+    )
 
-        # Upscale if requested
-        if scale > 1:
-            std_frame = GridDetector.upscale_nearest(std_frame, scale=scale)
-
-        processed_frames.append(std_frame)
-
-    # 4. Pack into unified sprite sheet
-    print("  [4/5] Standardizing bottom-center anchors and packing sprite sheet...")
-    scaled_cell = (cell_size[0] * scale, cell_size[1] * scale)
-    packed_sheet, metadata = SpritePacker.pack_horizontal_sheet(processed_frames, scaled_cell)
-
-    # 5. Export results
-    print("  [5/5] Exporting output files...")
     stem = input_path.stem
     char_out_dir = output_dir / stem
     char_out_dir.mkdir(parents=True, exist_ok=True)
@@ -112,42 +119,48 @@ def process_single_image(
     # Save packed sheet
     sheet_path = char_out_dir / f"{stem}_pixel_sheet.png"
     packed_sheet.save(sheet_path)
-    print(f"  [SUCCESS] Saved Packed Sheet: {sheet_path}")
+    print(f"  [SUCCESS] Saved Packed Matrix Sheet: {sheet_path}")
 
-    # Save JSON metadata
+    # Save Agentic AI JSON metadata
     json_path = char_out_dir / f"{stem}_metadata.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
+    print(f"  [SUCCESS] Saved Agentic Metadata: {json_path}")
 
-    # Save individual frames if requested
+    # Save individual motion frames if requested
     if export_frames:
         frames_dir = char_out_dir / "frames"
         frames_dir.mkdir(exist_ok=True)
-        for i, frame in enumerate(processed_frames):
-            frame_path = frames_dir / f"frame_{i:02d}.png"
-            frame.save(frame_path)
-        print(f"  [SUCCESS] Exported {len(processed_frames)} individual frames to {frames_dir}/")
+        for r_idx, row in enumerate(std_grid):
+            for c_idx, frame_img in enumerate(row):
+                frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
+                frame_img.save(frame_path)
+        print(f"  [SUCCESS] Exported {total_frames} individual motion frames to {frames_dir}/")
 
     return {
         "status": "success",
         "input": str(input_path),
         "sheet": str(sheet_path),
-        "frame_count": len(processed_frames),
-        "cell_size": f"{scaled_cell[0]}x{scaled_cell[1]}"
+        "rows": n_rows,
+        "total_frames": total_frames,
+        "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}"
     }
 
 
 def main_cli(args: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     parser = argparse.ArgumentParser(
-        description="PixelArtSmith: Convert SD AI Character Sheets into Authentic Grid-Perfect Pixel Art."
+        description="PixelArtSmith: Convert AI/SD Character Sheets into Authentic Grid-Perfect Pixel Art."
     )
     parser.add_argument("input", type=str, help="Input image file or directory path.")
     parser.add_argument("-o", "--output-dir", type=str, default="./output", help="Output directory path (default: ./output).")
-    parser.add_argument("-c", "--cell-size", type=str, default="48x64", help="Target logical cell size WxH (default: 48x64).")
-    parser.add_argument("-s", "--scale", type=int, default=1, help="Nearest-neighbor integer upscale factor (default: 1).")
+    parser.add_argument("-P", "--pitch", type=int, default=0, help="Override native pseudo-pixel pitch (0 = auto-detect).")
+    parser.add_argument("-c", "--cell-size", type=str, default="auto", help="Logical cell size WxH (default: auto).")
+    parser.add_argument("-s", "--scale", type=int, default=2, help="Nearest-neighbor integer upscale factor (default: 2).")
     parser.add_argument("-p", "--palette", type=str, default="endesga-32",
-                        choices=list(PALETTES.keys()) + ["adaptive-16", "adaptive-24", "adaptive-32", "none"],
+                        choices=list(PALETTES.keys()) + [
+                            "adaptive-8", "adaptive-16", "adaptive-24", "adaptive-32", "adaptive-64", "none"
+                        ],
                         help="Palette preset to snap colors to (default: endesga-32).")
     parser.add_argument("--no-remove-bg", action="store_true", help="Skip AI background removal.")
     parser.add_argument("--no-clean", action="store_true", help="Skip 1-pixel orphan noise cleanup.")
@@ -179,8 +192,8 @@ def main_cli(args: Optional[List[str]] = None) -> int:
         return 0
 
     print("========================================================================")
-    print(" PixelArtSmith: SD Sprite Sheet -> Grid-Perfect Pixel Art Engine")
-    print(f" Target cell: {cell_size[0]}x{cell_size[1]} | Scale: {parsed.scale}x | Palette: {parsed.palette}")
+    print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
+    print(f" Scale: {parsed.scale}x | Palette: {parsed.palette} | Pitch: {'Auto' if parsed.pitch == 0 else parsed.pitch}")
     print(f" Found {len(files)} image(s) to process.")
     print("========================================================================")
 
@@ -188,6 +201,7 @@ def main_cli(args: Optional[List[str]] = None) -> int:
         process_single_image(
             input_path=file_path,
             output_dir=output_dir,
+            pitch=parsed.pitch,
             cell_size=cell_size,
             scale=parsed.scale,
             palette_name=parsed.palette,
