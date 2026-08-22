@@ -25,7 +25,7 @@ class SpriteIsolator:
 
     @staticmethod
     def detect_matrix_layout(grid_img: Image.Image) -> tuple[str, int, int]:
-        """Detect whether the image is a Motion Matrix Sprite Sheet or a Snapper-Parity Canvas.
+        """Detect whether the image is a clean Standard 4x4 Sprite Sheet (Track A) or Snapper-Parity Canvas (Track B).
 
         Returns:
             (mode: "sheet" | "canvas", rows: int, cols: int)
@@ -34,33 +34,34 @@ class SpriteIsolator:
         alpha = arr[:, :, 3]
         h, w = alpha.shape
 
-        # 1. Y-axis projection to find motion rows
-        y_proj = np.sum(alpha > 0, axis=1)
-        in_row = False
-        row_bounds = []
-        start_y = 0
-        for y in range(h):
-            if y_proj[y] > 5 and not in_row:
-                in_row = True
-                start_y = y
-            elif y_proj[y] <= 5 and in_row:
-                in_row = False
-                if y - start_y >= 12:
-                    row_bounds.append((start_y, y))
-        if in_row and h - start_y >= 12:
-            row_bounds.append((start_y, h))
+        cell_w = w // 4
+        cell_h = h // 4
 
-        n_rows = len(row_bounds)
-        if n_rows < 2:
+        # 1. 16-Cell Non-Empty Check
+        cell_counts = np.zeros((4, 4), dtype=int)
+        for r in range(4):
+            for c in range(4):
+                x1, y1 = c * cell_w, r * cell_h
+                x2, y2 = (c + 1) * cell_w, (r + 1) * cell_h
+                cell_counts[r, c] = int(np.sum(alpha[y1:y2, x1:x2] > 0))
+
+        if not np.all(cell_counts >= 25):
             return "canvas", 1, 1
 
-        # 2. X-axis projection per row to detect actual frame columns
-        col_counts = []
-        for r_y1, r_y2 in row_bounds:
-            row_band = alpha[r_y1:r_y2, :]
+        # 2. Vertical Row Separation Valleys Check (y=24..40, 56..72, 88..104)
+        y_proj = np.sum(alpha > 0, axis=1)
+        v1 = np.min(y_proj[24:40])
+        v2 = np.min(y_proj[56:72])
+        v3 = np.min(y_proj[88:104])
+        if max(v1, v2, v3) > 5:
+            return "canvas", 1, 1
+
+        # 3. Column Count Check per Row (Must be exactly 4 frames, not 5 or merged)
+        for r in range(4):
+            row_band = alpha[r * cell_h : (r + 1) * cell_h, :]
             x_proj = np.sum(row_band > 0, axis=0)
-            in_col = False
             cols = 0
+            in_col = False
             start_x = 0
             for x in range(w):
                 if x_proj[x] > 2 and not in_col:
@@ -72,17 +73,10 @@ class SpriteIsolator:
                         cols += 1
             if in_col and w - start_x >= 4:
                 cols += 1
-            col_counts.append(cols)
+            if cols > 4:
+                return "canvas", 1, 1
 
-        max_cols = max(col_counts) if col_counts else 4
-        if max_cols >= 5:
-            target_cols = 5
-        elif max_cols >= 3:
-            target_cols = 4
-        else:
-            target_cols = max(1, max_cols)
-
-        return "sheet", n_rows, target_cols
+        return "sheet", 4, 4
 
     def isolate_matrix(
         self, grid_img: Image.Image, expected_rows: int | None = 4, expected_cols: int | None = 4
