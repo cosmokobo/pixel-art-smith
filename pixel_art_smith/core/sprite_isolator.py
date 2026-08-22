@@ -25,8 +25,9 @@ class SpriteIsolator:
 
     @staticmethod
     def detect_matrix_layout(grid_img: Image.Image) -> tuple[str, int, int]:
-        """Detect whether the image is a clean Standard 4x4 Sprite Sheet (Track A) or Snapper-Parity Canvas (Track B).
+        """Detect whether the image is a Motion Matrix Sprite Sheet (Track A: 4x4 or 4x5) or Snapper-Parity Canvas (Track B).
 
+        Uses 2D Matrix Energy Variance and Cell Density to identify 4x4 vs 4x5 motion sheets.
         Returns:
             (mode: "sheet" | "canvas", rows: int, cols: int)
         """
@@ -34,56 +35,44 @@ class SpriteIsolator:
         alpha = arr[:, :, 3]
         h, w = alpha.shape
 
-        cell_w = w // 4
-        cell_h = h // 4
-
-        # 1. 16-Cell Non-Empty Check
-        cell_counts = np.zeros((4, 4), dtype=int)
-        for r in range(4):
-            for c in range(4):
-                x1, y1 = c * cell_w, r * cell_h
-                x2, y2 = (c + 1) * cell_w, (r + 1) * cell_h
-                cell_counts[r, c] = int(np.sum(alpha[y1:y2, x1:x2] > 0))
-
-        if not np.all(cell_counts >= 25):
+        # 1. Check if all 4 motion rows (0..32, 32..64, 64..96, 96..128) contain active characters
+        row_energies = [int(np.sum(alpha[r * 32 : (r + 1) * 32, :] > 0)) for r in range(4)]
+        if any(e < 150 for e in row_energies):
             return "canvas", 1, 1
 
-        # 2. Vertical Row Separation Valleys Check (y=24..40, 56..72, 88..104)
-        y_proj = np.sum(alpha > 0, axis=1)
-        v1 = np.min(y_proj[24:40])
-        v2 = np.min(y_proj[56:72])
-        v3 = np.min(y_proj[88:104])
-        if max(v1, v2, v3) > 5:
-            return "canvas", 1, 1
-
-        # 3. Column Count Check per Row (Must be exactly 4 frames, not 5 or merged)
+        # 2. Check 4x5 Matrix Energy
+        m5 = []
         for r in range(4):
-            row_band = alpha[r * cell_h : (r + 1) * cell_h, :]
-            x_proj = np.sum(row_band > 0, axis=0)
-            cols = 0
-            in_col = False
-            start_x = 0
-            for x in range(w):
-                if x_proj[x] > 2 and not in_col:
-                    in_col = True
-                    start_x = x
-                elif x_proj[x] <= 2 and in_col:
-                    in_col = False
-                    if x - start_x >= 4:
-                        cols += 1
-            if in_col and w - start_x >= 4:
-                cols += 1
-            if cols > 4:
-                return "canvas", 1, 1
+            cols = [
+                int(np.sum(alpha[r * 32 : (r + 1) * 32, int(round(c * w / 5)) : int(round((c + 1) * w / 5))] > 0))
+                for c in range(5)
+            ]
+            m5.append(cols)
+        m5_arr = np.array(m5)
 
-        return "sheet", 4, 4
+        # 3. Check 4x4 Matrix Energy
+        m4 = []
+        for r in range(4):
+            cols = [int(np.sum(alpha[r * 32 : (r + 1) * 32, c * 32 : (c + 1) * 32] > 0)) for c in range(4)]
+            m4.append(cols)
+        m4_arr = np.array(m4)
+
+        # 4. Determine best-fit matrix (4x4 vs 4x5) based on intra-row variance and cell coverage
+        if np.all(m5_arr >= 30) and np.std(m5_arr, axis=1).mean() < np.std(m4_arr, axis=1).mean():
+            return "sheet", 4, 5
+        elif np.all(m4_arr >= 30):
+            return "sheet", 4, 4
+        elif np.all(m5_arr >= 30):
+            return "sheet", 4, 5
+        else:
+            return "canvas", 1, 1
 
     def isolate_matrix(
         self, grid_img: Image.Image, expected_rows: int | None = 4, expected_cols: int | None = 4
     ) -> list[list[FrameItem]]:
         """Isolate frames from a downsampled True-Grid image.
 
-        By default, utilizes Grid-Cell Segmentation (4 rows x 4 cols = 16 frames)
+        By default, utilizes Grid-Cell Segmentation (4 rows x N cols)
         which keeps detached wands, floating particles, and hair ribbons safely bound to each frame.
         """
         arr = np.array(grid_img.convert("RGBA"))
@@ -97,18 +86,20 @@ class SpriteIsolator:
         return self._isolate_by_contours(grid_img)
 
     def isolate_grid_cells(self, grid_img: Image.Image, n_rows: int = 4, n_cols: int = 4) -> list[list[FrameItem]]:
-        """Slice the grid image into a clean N_rows x N_cols matrix of frames."""
+        """Slice the grid image into a clean N_rows x N_cols matrix of frames with precise sub-pixel rounding."""
         arr = np.array(grid_img.convert("RGBA"))
         img_h, img_w = arr.shape[:2]
-        cell_w = img_w // n_cols
-        cell_h = img_h // n_rows
 
         matrix: list[list[FrameItem]] = []
         for r in range(n_rows):
             row_items: list[FrameItem] = []
+            y1 = int(round(r * img_h / n_rows))
+            y2 = int(round((r + 1) * img_h / n_rows))
             for c in range(n_cols):
-                x1, y1 = c * cell_w, r * cell_h
-                x2, y2 = min(img_w, (c + 1) * cell_w), min(img_h, (r + 1) * cell_h)
+                x1 = int(round(c * img_w / n_cols))
+                x2 = int(round((c + 1) * img_w / n_cols))
+                cell_w = x2 - x1
+                cell_h = y2 - y1
                 cell_arr = arr[y1:y2, x1:x2]
 
                 alpha = cell_arr[:, :, 3]

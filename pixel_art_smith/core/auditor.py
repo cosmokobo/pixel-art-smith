@@ -81,13 +81,13 @@ class QualityAuditor:
             unique_colors = 0
 
         # Deterministic Verdict Evaluation
-        is_4x4_sheet = rows == 4 and cols == 4 and total_frames == 16
+        is_matrix_sheet = rows == 4 and cols in (4, 5) and total_frames in (16, 20)
         is_canvas_asset = rows == 1 and cols == 1 and total_frames == 1
         is_pixels_retained = opaque_px > 1000
 
-        if is_4x4_sheet and is_pixels_retained:
+        if is_matrix_sheet and is_pixels_retained:
             verdict = "✅ PASS"
-            notes = "100% 4x4 Grid Intact | 0% Detail Erosion"
+            notes = f"100% {rows}x{cols} Grid Intact | 0% Detail Erosion"
         elif is_canvas_asset and is_pixels_retained:
             verdict = "✅ PASS"
             notes = "100% Snapper-Parity Canvas | 0% Detail Erosion"

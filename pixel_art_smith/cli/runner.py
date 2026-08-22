@@ -42,8 +42,8 @@ def process_single_image(
     remove_bg: bool = True,
     clean_orphans: bool = False,
     export_frames: bool = False,
-    expected_rows: int = 4,
-    expected_cols: int = 4,
+    expected_rows: int | None = None,
+    expected_cols: int | None = None,
 ) -> dict:
     """Execute Snapper-Parity True-Grid post-processing pipeline on a sprite sheet."""
     print(f"\n[INFO] Processing: {input_path.name}")
