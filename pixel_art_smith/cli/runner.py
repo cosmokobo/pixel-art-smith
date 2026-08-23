@@ -6,11 +6,11 @@ import json
 import sys
 from pathlib import Path
 
-import cv2
 import numpy as np
 from PIL import Image
 
 from ..core.auditor import AuditMetric, QualityAuditor
+from ..core.bg_remover import BackgroundRemover
 from ..core.cleaner import PixelCleaner
 from ..core.grid_detector import GridDetector
 from ..core.packer import SpritePacker
@@ -64,26 +64,12 @@ def process_single_image(
     grid_arr = np.array(grid_img)
     target_h, target_w = grid_arr.shape[:2]
 
-    # 2. Strict Non-Leaking Spatial Background Segmentation (4-connected floodfill from corners)
+    # 2. Strict Non-Leaking Spatial Background Segmentation with Enclosed Cavity Resolution (EBCR)
     if remove_bg:
-        print("  [2/4] Detecting background perimeter without leaking into character interior...")
-        mask = np.zeros((target_h + 2, target_w + 2), np.uint8)
-        bgr = cv2.cvtColor(grid_arr, cv2.COLOR_RGB2BGR)
-        flags = cv2.FLOODFILL_MASK_ONLY | (255 << 8) | 4  # 4-connectivity prevents diagonal leakage
-        diff = (5, 5, 5)
-
-        # 4 corners and borders
-        cv2.floodFill(bgr.copy(), mask, (0, 0), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (target_w - 1, 0), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (0, target_h - 1), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (target_w - 1, target_h - 1), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (target_w // 2, 0), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (target_w // 2, target_h - 1), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (0, target_h // 2), 255, diff, diff, flags=flags)
-        cv2.floodFill(bgr.copy(), mask, (target_w - 1, target_h // 2), 255, diff, diff, flags=flags)
-
-        bg_mask = mask[1 : target_h + 1, 1 : target_w + 1] == 255
-        fg_mask = ~bg_mask
+        print("  [2/4] Detecting background perimeter and resolving enclosed cavities (hair loops/limb gaps)...")
+        bg_mask, fg_mask, resolved_cavities = BackgroundRemover.segment_background_with_cavity_resolution(grid_arr)
+        if resolved_cavities > 0:
+            print(f"        Resolved {resolved_cavities} trapped background cavity pixel(s).")
     else:
         bg_mask = np.zeros((target_h, target_w), dtype=bool)
         fg_mask = np.ones((target_h, target_w), dtype=bool)
