@@ -42,6 +42,7 @@ def process_single_image(
     remove_bg: bool = True,
     clean_orphans: bool = False,
     export_frames: bool = False,
+    export_1x: bool = True,
     expected_rows: int | None = None,
     expected_cols: int | None = None,
 ) -> dict:
@@ -127,6 +128,10 @@ def process_single_image(
     detected_mode, auto_rows, auto_cols = SpriteIsolator.detect_matrix_layout(clean_img)
     force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas")
 
+    packed_sheet_1x = None
+    metadata_1x = None
+    std_grid_1x = None
+
     if detected_mode == "sheet" and not force_canvas:
         eff_rows = expected_rows if expected_rows is not None else auto_rows
         eff_cols = expected_cols if expected_cols is not None else auto_cols
@@ -153,6 +158,16 @@ def process_single_image(
             palette_colors=palette_colors,
             grid_mode=grid_mode,
         )
+
+        if export_1x and scale > 1:
+            packed_sheet_1x, metadata_1x, std_grid_1x = SpritePacker.pack_matrix_sheet(
+                matrix=matrix,
+                cell_size=final_cell_size,
+                scale=1,
+                palette_name=palette_name,
+                palette_colors=palette_colors,
+                grid_mode=grid_mode,
+            )
     else:
         print("  [4/4] Non-4-motion structure detected -> Snapper-Parity Canvas Mode (Track B: 1:1 Clean Asset)...")
         n_rows = 1
@@ -165,18 +180,37 @@ def process_single_image(
             palette_colors=palette_colors,
         )
 
+        if export_1x and scale > 1:
+            packed_sheet_1x, metadata_1x, std_grid_1x = SpritePacker.pack_canvas_sheet(
+                canvas_img=clean_img,
+                scale=1,
+                palette_name=palette_name,
+                palette_colors=palette_colors,
+            )
+
     stem = input_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save primary output image
+    # Save primary output image (Display scale, e.g. 4x)
     sheet_path = output_dir / f"{stem}_pixel_sheet.png"
     packed_sheet.save(sheet_path)
-    print(f"  [SUCCESS] Output Sprite Sheet: {sheet_path}")
+    print(f"  [SUCCESS] Output Sprite Sheet ({scale}x): {sheet_path}")
 
     # Save Agentic AI JSON metadata
     json_path = output_dir / f"{stem}_metadata.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
+
+    # Save 1x native resolution output image & metadata to '1x/' subfolder
+    if export_1x and scale > 1 and packed_sheet_1x is not None:
+        dir_1x = output_dir / "1x"
+        dir_1x.mkdir(parents=True, exist_ok=True)
+        sheet_1x_path = dir_1x / f"{stem}_pixel_sheet.png"
+        packed_sheet_1x.save(sheet_1x_path)
+        json_1x_path = dir_1x / f"{stem}_metadata.json"
+        with open(json_1x_path, "w", encoding="utf-8") as f:
+            json.dump(metadata_1x, f, indent=2)
+        print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
 
     if export_frames:
         frames_dir = output_dir / f"{stem}_frames"
@@ -185,7 +219,16 @@ def process_single_image(
             for c_idx, frame_img in enumerate(row):
                 frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
                 frame_img.save(frame_path)
-        print(f"  [INFO] Exported individual frames to: {frames_dir}/")
+        print(f"  [INFO] Exported individual frames ({scale}x) to: {frames_dir}/")
+
+        if export_1x and scale > 1 and std_grid_1x is not None:
+            frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
+            frames_1x_dir.mkdir(parents=True, exist_ok=True)
+            for r_idx, row in enumerate(std_grid_1x):
+                for c_idx, frame_img in enumerate(row):
+                    frame_path = frames_1x_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
+                    frame_img.save(frame_path)
+            print(f"  [INFO] Exported individual 1x frames to: {frames_1x_dir}/")
 
     # Run deterministic quality audit
     audit_metric = QualityAuditor.audit_single(
@@ -244,6 +287,12 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
     parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
     parser.add_argument(
+        "--export-1x",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export 1x native resolution sprite sheet to '1x/' subfolder (default: True).",
+    )
+    parser.add_argument(
         "--report-name",
         type=str,
         default="result.md",
@@ -284,7 +333,7 @@ def main_cli(args: list[str] | None = None) -> int:
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
     print(
-        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x"
+        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x}"
     )
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
@@ -306,6 +355,7 @@ def main_cli(args: list[str] | None = None) -> int:
                 remove_bg=not parsed.no_bg_remove,
                 clean_orphans=parsed.clean_orphans,
                 export_frames=parsed.export_frames,
+                export_1x=parsed.export_1x,
             )
             if res.get("status") == "success":
                 success_count += 1
