@@ -121,7 +121,7 @@ class QualityAuditor:
         output_dir: Path,
         report_name: str = "audit_report.md",
     ) -> Path:
-        """Generate a user-friendly, highly visual Markdown summary report with Mermaid diagrams."""
+        """Generate a user-friendly, highly visual Markdown summary report with 1x/4x deliverables and Mermaid diagrams."""
         report_path = output_dir / report_name
         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -140,6 +140,18 @@ class QualityAuditor:
             "",
             "---",
             "",
+            "## 📦 Output Deliverables & Dual-Resolution Distribution",
+            "",
+            "PixelArtSmith automatically generates and distributes assets into dedicated resolution folders:",
+            "",
+            "| Folder | Resolution | Cell Size | Target Usage | Recommended Filter |",
+            "| :--- | :---: | :---: | :--- | :--- |",
+            "| **`1x/`** | $128\\times 128$ / $160\\times 128$ | $32\\times 32\\text{px}$ | 🎮 **Game Engine Integration** (Godot, Unity, Unreal, RPG Maker) | `Nearest-Neighbor / Point` |",
+            "| **`4x/`** | $512\\times 512$ / $640\\times 512$ | $128\\times 128\\text{px}$ | 🖼️ **High-Resolution UI & Web Gallery Display** | `Crisp Display` |",
+            "| **Root (`./`)** | $512\\times 512$ / $640\\times 512$ | $128\\times 128\\text{px}$ | 🖥️ **Master Preview Sheets, Metadata & Audit Report** | `Standard Preview` |",
+            "",
+            "---",
+            "",
             "## 📊 Executive Summary & Quality Highlights",
             "",
             "| Total Sprites | Verification Pass Rate | Total Rendered Pixels | Avg Palette Colors | Detail Loss Rate |",
@@ -153,25 +165,29 @@ class QualityAuditor:
             "```mermaid",
             "graph LR",
             "    SRC[1024x1024 SD Source] -->|Pitch-8 Subblock| SAMP[128x128 Core Grid]",
-            "    SAMP -->|4-Connected Discrete FloodFill| BG[Zero-Leakage Alpha Mask]",
-            "    BG -->|Chroma-Weighted CIELAB K-Means| PAL[16-Color Palette Quantizer]",
-            "    PAL -->|8-Directional Neighbor Filter| DETAIL[Detail & Veil Preserver]",
-            "    DETAIL -->|Bottom-Center Baseline Align| MAT[4x4 Standardized Matrix Sheet]",
-            "    MAT -->|Deterministic JSON Export| OUT[Game Engine Ready Sheet + Metadata]",
+            "    SAMP -->|EBCR Cavity FloodFill| BG[Zero-Leakage Alpha Mask]",
+            "    BG -->|Chroma-Weighted CIELAB| PAL[16-Color Palette Quantizer]",
+            "    PAL -->|Standardized Grid Packing| MAT[32x32 Grounded Matrix Sheet]",
+            "    MAT -->|Dual-Scale Export| OUT1X[1x/ Game Engine Asset]",
+            "    MAT -->|Dual-Scale Export| OUT4X[4x/ High-Res Display Asset]",
             "```",
             "",
             "---",
             "",
             "## 📋 Comprehensive Quality Audit Matrix",
             "",
-            "| # | Character Sheet | Source Res | Output Sheet | Grid Matrix | Frames | Opaque Pixels | Skin/Face | Colors | Verdict |",
-            "| :-: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+            "| # | Character Sheet | Source Res | 1x Native Sheet (Game) | 4x Display Sheet | Grid Layout | Frames | Palette | Verdict |",
+            "| :-: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
 
         for idx, m in enumerate(metrics, start=1):
+            sheet_1x_str = f"{m.cols * m.logical_cell[0]}x{m.rows * m.logical_cell[1]} px"
+            sheet_4x_str = f"{m.sheet_res[0]}x{m.sheet_res[1]} px"
             lines.append(
-                f"| {idx} | **`{m.name}`** | {m.source_res[0]}x{m.source_res[1]} | {m.sheet_res[0]}x{m.sheet_res[1]} px | "
-                f"{m.rows}x{m.cols} | **{m.total_frames} F** | {m.opaque_pixels:,} px | {m.skin_pixels:,} px | {m.unique_colors}c | {m.verdict} |"
+                f"| {idx} | **`{m.name}`** | {m.source_res[0]}x{m.source_res[1]} | "
+                f"`{sheet_1x_str}` ({m.logical_cell[0]}x{m.logical_cell[1]} cell) | "
+                f"`{sheet_4x_str}` ({m.display_cell[0]}x{m.display_cell[1]} cell) | "
+                f"{m.rows}x{m.cols} | **{m.total_frames} F** | {m.unique_colors}c ({m.palette_name}) | {m.verdict} |"
             )
 
         lines.extend(
@@ -179,35 +195,40 @@ class QualityAuditor:
                 "",
                 "---",
                 "",
-                "## 🔍 Frame Geometry & Animation Layout",
+                "## 📁 Generated Output Manifest Tree",
                 "",
-                "```mermaid",
-                "classDiagram",
-                "    class SpriteSheet {",
-                "        +int total_frames: 16",
-                "        +int rows: 4 (Motions)",
-                "        +int columns: 4 (Frames)",
-                "        +string anchor: bottom-center",
-                "        +scale: 4x Nearest-Neighbor",
-                "    }",
-                "    class Motion0 { +Front_Walk_Idle : 4 Frames }",
-                "    class Motion1 { +Side_Walk_Left : 4 Frames }",
-                "    class Motion2 { +Side_Walk_Right : 4 Frames }",
-                "    class Motion3 { +Back_Walk : 4 Frames }",
-                "    SpriteSheet --> Motion0",
-                "    SpriteSheet --> Motion1",
-                "    SpriteSheet --> Motion2",
-                "    SpriteSheet --> Motion3",
+                "```",
+                f"{output_dir.name}/",
+                "├── 1x/                         # 🎮 1x Native Game Assets",
+            ]
+        )
+
+        for m in metrics:
+            lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+            lines.append(f"│   ├── {m.name}_metadata.json")
+
+        lines.extend(
+            [
+                "├── 4x/                         # 🖼️ 4x High-Res Display Assets",
+            ]
+        )
+        for m in metrics:
+            lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+            lines.append(f"│   ├── {m.name}_metadata.json")
+
+        lines.extend(
+            [
+                "└── result.md                   # 📊 Comprehensive Conversion Audit Report",
                 "```",
                 "",
                 "---",
                 "",
                 "## 🛡️ Non-Destructive Quality Guarantees",
                 "",
-                "- **Zero-Erosion Facial Fidelity**: All pale skin tones, eyes, and expressions are shielded from floodfill background clipping.",
-                "- **Fine Hair & Veil Protection**: 8-Connected neighborhood scanning guarantees 1-pixel diagonal hair strands, pointed veil ends, and weapon blades remain 100% intact.",
-                "- **Commercial Snapper-16 Color Parity**: Dedicated foreground palette quantization dedicates all 16 discrete slots exclusively to character features.",
-                "- **Game Engine Immediate Integration**: Unified baseline bottom-center alignment eliminates character jitter during in-game animation playback.",
+                "- **EBCR Enclosed Background Cavity Resolution**: All trapped white background pockets (hair loops, twintails, arm/leg gaps) are 100% eliminated while character clothing is preserved.",
+                "- **Zero-Erosion Facial Fidelity**: Pale skin tones, eyes, and facial expressions are shielded from floodfill clipping.",
+                "- **Snapper-16 Color Parity**: Dedicated foreground palette quantization dedicates all 16 discrete slots exclusively to character features.",
+                "- **Game Engine Direct Integration**: Unified baseline bottom-center alignment eliminates character vertical jitter during animation playback.",
                 "",
                 "---",
                 f"*Report automatically generated by **PixelArtSmith Core v2.0** on `{timestamp_str}`.*",
