@@ -201,6 +201,17 @@ def process_single_image(
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
+    # Save scale-specific output image & metadata to '<scale>x/' subfolder (e.g. '4x/')
+    if scale > 1:
+        dir_scaled = output_dir / f"{scale}x"
+        dir_scaled.mkdir(parents=True, exist_ok=True)
+        sheet_scaled_path = dir_scaled / f"{stem}_pixel_sheet.png"
+        packed_sheet.save(sheet_scaled_path)
+        json_scaled_path = dir_scaled / f"{stem}_metadata.json"
+        with open(json_scaled_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+        print(f"  [SUCCESS] Output {scale}x Scaled Sprite Sheet: {sheet_scaled_path}")
+
     # Save 1x native resolution output image & metadata to '1x/' subfolder
     if export_1x and scale > 1 and packed_sheet_1x is not None:
         dir_1x = output_dir / "1x"
@@ -220,6 +231,15 @@ def process_single_image(
                 frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
                 frame_img.save(frame_path)
         print(f"  [INFO] Exported individual frames ({scale}x) to: {frames_dir}/")
+
+        if scale > 1:
+            frames_scaled_dir = output_dir / f"{scale}x" / f"{stem}_frames"
+            frames_scaled_dir.mkdir(parents=True, exist_ok=True)
+            for r_idx, row in enumerate(std_grid):
+                for c_idx, frame_img in enumerate(row):
+                    frame_path = frames_scaled_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
+                    frame_img.save(frame_path)
+            print(f"  [INFO] Exported individual {scale}x frames to: {frames_scaled_dir}/")
 
         if export_1x and scale > 1 and std_grid_1x is not None:
             frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
