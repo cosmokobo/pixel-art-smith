@@ -463,8 +463,12 @@ def main_cli(args: list[str] | None = None) -> int:
             f" Total: {len(audit_metrics)} | Passed: {sum(1 for m in audit_metrics if 'PASS' in m.verdict)} | Pass Rate: 100.0%"
         )
 
-    print("\n[SUCCESS] All processing completed successfully!")
-    return 0 if success_count > 0 else 1
+    if len(image_files) > 0 and success_count == len(image_files):
+        print("\n[SUCCESS] All processing completed successfully!")
+        return 0
+    else:
+        print(f"\n[WARNING] Processed {success_count}/{len(image_files)} image(s) successfully.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

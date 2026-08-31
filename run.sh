@@ -9,7 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
 
 # 1. Select Best Available Python (3.10 / 3.11 preferred via pyenv or system python3)
-PYTHON_CMD="python3"
+PYTHON_CMD="${PYTHON_BIN:-python3}"
+if ! command -v "$PYTHON_CMD" >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+fi
 if command -v pyenv >/dev/null 2>&1; then
     PYENV_ROOT="$(pyenv root 2>/dev/null || echo "$HOME/.pyenv")"
     if [ -x "$PYENV_ROOT/versions/3.11.14/bin/python3" ]; then
