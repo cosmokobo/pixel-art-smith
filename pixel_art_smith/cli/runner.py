@@ -31,6 +31,36 @@ def parse_cell_size(size_str: str | None) -> tuple[int, int] | None:
     return n, n
 
 
+def export_frame_grid_by_motion(
+    frame_grid: list[list[Image.Image]],
+    target_dir: Path,
+    stem: str = "",
+) -> None:
+    """Export individual frame PNGs organized by motion subfolders and tagged filenames."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    n_rows = len(frame_grid)
+    direction_names = ["down", "left", "right", "up"]
+
+    for r_idx, row in enumerate(frame_grid):
+        if n_rows == 4 and r_idx < len(direction_names):
+            motion_tag = f"motion_{r_idx:02d}_{direction_names[r_idx]}"
+        else:
+            motion_tag = f"motion_{r_idx:02d}"
+
+        # Subfolder per motion (e.g. motion_00_down/)
+        sub_dir = target_dir / motion_tag
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        for old_f in sub_dir.glob("*.png"):
+            old_f.unlink()
+
+        for c_idx, frame_img in enumerate(row):
+            # 1. Inside motion subfolder (e.g. motion_00_down/frame_00.png)
+            frame_img.save(sub_dir / f"frame_{c_idx:02d}.png")
+            # 2. In frames directory with direction-tagged and indexed names
+            frame_img.save(target_dir / f"{motion_tag}_frame_{c_idx:02d}.png")
+            frame_img.save(target_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png")
+
+
 def process_single_image(
     input_path: Path,
     output_dir: Path,
@@ -42,7 +72,7 @@ def process_single_image(
     max_colors: int = 16,
     remove_bg: bool = True,
     clean_orphans: bool = False,
-    export_frames: bool = False,
+    export_frames: bool = True,
     export_gifs: bool = True,
     gif_duration: int = 150,
     export_1x: bool = True,
@@ -212,38 +242,43 @@ def process_single_image(
             json.dump(metadata_1x, f, indent=2)
         print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
 
-    if export_frames:
-        frames_dir = output_dir / f"{stem}_frames"
-        frames_dir.mkdir(exist_ok=True)
-        for old_f in frames_dir.glob("motion_*.png"):
-            old_f.unlink()
-        for r_idx, row in enumerate(std_grid):
-            for c_idx, frame_img in enumerate(row):
-                frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
-                frame_img.save(frame_path)
-        print(f"  [INFO] Exported individual frames ({scale}x) to: {frames_dir}/")
+    if export_frames and std_grid:
+        # Determine 1x native resolution frame grid
+        grid_1x_native = std_grid_1x if (std_grid_1x is not None) else (std_grid if scale == 1 else None)
+        if grid_1x_native is None:
+            if detected_mode == "sheet":
+                _, _, grid_1x_native = SpritePacker.pack_matrix_sheet(
+                    matrix=matrix,
+                    cell_size=final_cell_size,
+                    scale=1,
+                    palette_name=palette_name,
+                    palette_colors=palette_colors,
+                    grid_mode=grid_mode,
+                )
+            else:
+                _, _, grid_1x_native = SpritePacker.pack_canvas_sheet(
+                    canvas_img=clean_img,
+                    scale=1,
+                    palette_name=palette_name,
+                    palette_colors=palette_colors,
+                )
 
+        # 1. Export 1x native individual frames (by motion) to root '{stem}_frames/'
+        frames_dir = output_dir / f"{stem}_frames"
+        export_frame_grid_by_motion(grid_1x_native, frames_dir, stem=stem)
+        print(f"  [INFO] Exported 1x native individual frames (by motion) to: {frames_dir}/")
+
+        # 2. Export 1x native individual frames to '1x/{stem}_frames/'
+        if export_1x and scale > 1:
+            frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
+            export_frame_grid_by_motion(grid_1x_native, frames_1x_dir, stem=stem)
+            print(f"  [INFO] Exported 1x native individual frames to: {frames_1x_dir}/")
+
+        # 3. Export 4x scaled individual frames to '<scale>x/{stem}_frames/'
         if scale > 1:
             frames_scaled_dir = output_dir / f"{scale}x" / f"{stem}_frames"
-            frames_scaled_dir.mkdir(parents=True, exist_ok=True)
-            for old_f in frames_scaled_dir.glob("motion_*.png"):
-                old_f.unlink()
-            for r_idx, row in enumerate(std_grid):
-                for c_idx, frame_img in enumerate(row):
-                    frame_path = frames_scaled_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
-                    frame_img.save(frame_path)
-            print(f"  [INFO] Exported individual {scale}x frames to: {frames_scaled_dir}/")
-
-        if export_1x and scale > 1 and std_grid_1x is not None:
-            frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
-            frames_1x_dir.mkdir(parents=True, exist_ok=True)
-            for old_f in frames_1x_dir.glob("motion_*.png"):
-                old_f.unlink()
-            for r_idx, row in enumerate(std_grid_1x):
-                for c_idx, frame_img in enumerate(row):
-                    frame_path = frames_1x_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
-                    frame_img.save(frame_path)
-            print(f"  [INFO] Exported individual 1x frames to: {frames_1x_dir}/")
+            export_frame_grid_by_motion(std_grid, frames_scaled_dir, stem=stem)
+            print(f"  [INFO] Exported {scale}x scaled individual frames to: {frames_scaled_dir}/")
 
     # Export Animated GIFs (individual motion GIFs + all-motions composite GIF)
     if export_gifs and std_grid:
@@ -332,7 +367,12 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument("-s", "--scale", type=int, default=4, help="Integer upscale factor for display (default: 4).")
     parser.add_argument("--no-bg-remove", action="store_true", help="Keep solid background without transparency.")
     parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
-    parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
+    parser.add_argument(
+        "--export-frames",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export individual 1x native standardized frame PNGs by motion (default: True).",
+    )
     parser.add_argument(
         "--export-gifs",
         action=argparse.BooleanOptionalAction,
@@ -392,7 +432,7 @@ def main_cli(args: list[str] | None = None) -> int:
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
     print(
-        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x} | Export GIFs: {parsed.export_gifs}"
+        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x} | Export Frames (1x): {parsed.export_frames} | Export GIFs: {parsed.export_gifs}"
     )
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")

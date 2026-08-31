@@ -106,7 +106,7 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 | **`--export-1x`** | `bool` | `True` | **게임 엔진용 1배(1x) 원본 규격 스프라이트 시트 및 메타데이터를 `1x/` 하위 폴더에 동시 생성** (`--no-export-1x`로 비활성화 가능). |
 | **`--export-gifs`** | `bool` | `True` | **방향/동작별 개별 애니메이션 GIF 및 전방향 통합 프리뷰 GIF 동시 생성** (`--no-export-gifs`로 비활성화 가능). |
 | **`--gif-duration`** | `int` | `150` | 애니메이션 GIF 프레임당 노출 시간 (ms 단위, 기본: 150ms). |
-| **`--export-frames`** | `flag` | `False` | 시트 외에 **개별 모션 프레임 낱장 PNG 파일들을 하위 폴더(`_frames/`)에 동시 분할 저장**. |
+| **`--export-frames`** | `bool` | `True` | **동작(모션)별 및 프레임별 1배(1x) 원본 규격 낱장 PNG 파일들을 하위 폴더(`_frames/`)에 동시 분할 저장** (`--no-export-frames`로 비활성화 가능). |
 | **`--clean-orphans`** | `flag` | `False` | $1\text{px}$ 크기의 고립된 단일 노이즈 픽셀 자동 제거. |
 | **`--no-bg-remove`** | `flag` | `False` | 배경 투명화 제거를 건너뛰고 원본 배경색을 그대로 유지. |
 | **`--report-name`** | `str` | `result.md` | 품질 감사 마크다운 리포트 파일명. |
