@@ -210,41 +210,23 @@ def process_single_image(
     stem = input_path.stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save primary output image (Display scale, e.g. 4x)
-    sheet_path = output_dir / f"{stem}_pixel_sheet.png"
-    packed_sheet.save(sheet_path)
-    print(f"  [SUCCESS] Output Sprite Sheet ({scale}x): {sheet_path}")
+    # 1. 1x Native Resolution Deliverables (Game Engine Direct Integration)
+    dir_1x = (output_dir / "1x") if (scale > 1 and export_1x) else output_dir
+    dir_1x.mkdir(parents=True, exist_ok=True)
 
-    # Save Agentic AI JSON metadata
-    json_path = output_dir / f"{stem}_metadata.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
+    sheet_1x_to_save = packed_sheet_1x if (packed_sheet_1x is not None) else packed_sheet
+    metadata_1x_to_save = metadata_1x if (metadata_1x is not None) else metadata
+    grid_1x_native = std_grid_1x if (std_grid_1x is not None) else (std_grid if scale == 1 else None)
 
-    # Save scale-specific output image & metadata to '<scale>x/' subfolder (e.g. '4x/')
-    if scale > 1:
-        dir_scaled = output_dir / f"{scale}x"
-        dir_scaled.mkdir(parents=True, exist_ok=True)
-        sheet_scaled_path = dir_scaled / f"{stem}_pixel_sheet.png"
-        packed_sheet.save(sheet_scaled_path)
-        json_scaled_path = dir_scaled / f"{stem}_metadata.json"
-        with open(json_scaled_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-        print(f"  [SUCCESS] Output {scale}x Scaled Sprite Sheet: {sheet_scaled_path}")
+    sheet_1x_path = dir_1x / f"{stem}_pixel_sheet.png"
+    sheet_1x_to_save.save(sheet_1x_path)
+    json_1x_path = dir_1x / f"{stem}_metadata.json"
+    with open(json_1x_path, "w", encoding="utf-8") as f:
+        json.dump(metadata_1x_to_save, f, indent=2)
+    print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
 
-    # Save 1x native resolution output image & metadata to '1x/' subfolder
-    if export_1x and scale > 1 and packed_sheet_1x is not None:
-        dir_1x = output_dir / "1x"
-        dir_1x.mkdir(parents=True, exist_ok=True)
-        sheet_1x_path = dir_1x / f"{stem}_pixel_sheet.png"
-        packed_sheet_1x.save(sheet_1x_path)
-        json_1x_path = dir_1x / f"{stem}_metadata.json"
-        with open(json_1x_path, "w", encoding="utf-8") as f:
-            json.dump(metadata_1x, f, indent=2)
-        print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
-
-    if export_frames and std_grid:
-        # Determine 1x native resolution frame grid
-        grid_1x_native = std_grid_1x if (std_grid_1x is not None) else (std_grid if scale == 1 else None)
+    # 1x Frames
+    if export_frames:
         if grid_1x_native is None:
             if detected_mode == "sheet":
                 _, _, grid_1x_native = SpritePacker.pack_matrix_sheet(
@@ -263,67 +245,69 @@ def process_single_image(
                     palette_colors=palette_colors,
                 )
 
-        # 1. Export 1x native individual frames (by motion) to root '{stem}_frames/'
-        frames_dir = output_dir / f"{stem}_frames"
-        export_frame_grid_by_motion(grid_1x_native, frames_dir, stem=stem)
-        print(f"  [INFO] Exported 1x native individual frames (by motion) to: {frames_dir}/")
+        frames_1x_dir = dir_1x / f"{stem}_frames"
+        export_frame_grid_by_motion(grid_1x_native, frames_1x_dir, stem=stem)
+        print(f"  [INFO] Exported 1x native frames (by motion) to: {frames_1x_dir}/")
 
-        # 2. Export 1x native individual frames to '1x/{stem}_frames/'
-        if export_1x and scale > 1:
-            frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
-            export_frame_grid_by_motion(grid_1x_native, frames_1x_dir, stem=stem)
-            print(f"  [INFO] Exported 1x native individual frames to: {frames_1x_dir}/")
-
-        # 3. Export 4x scaled individual frames to '<scale>x/{stem}_frames/'
-        if scale > 1:
-            frames_scaled_dir = output_dir / f"{scale}x" / f"{stem}_frames"
-            export_frame_grid_by_motion(std_grid, frames_scaled_dir, stem=stem)
-            print(f"  [INFO] Exported {scale}x scaled individual frames to: {frames_scaled_dir}/")
-
-    # Export Animated GIFs (individual motion GIFs + all-motions composite GIF)
-    if export_gifs and std_grid:
-        gif_res = GifExporter.export_all_gifs(
-            std_grid=std_grid,
-            output_dir=output_dir,
+    # 1x GIFs (placed inside {stem}_gifs/ subfolder)
+    if export_gifs and grid_1x_native:
+        gifs_1x_dir = dir_1x / f"{stem}_gifs"
+        gif_res_1x = GifExporter.export_all_gifs(
+            std_grid=grid_1x_native,
+            output_dir=gifs_1x_dir,
             stem=stem,
             duration=gif_duration,
         )
         print(
-            f"  [INFO] Exported {len(gif_res['individual_gifs'])} motion GIF(s) and composite preview to: {output_dir}/"
+            f"  [INFO] Exported 1x native motion GIFs to: {gifs_1x_dir}/"
         )
 
-        if scale > 1:
-            dir_scaled_gifs = output_dir / f"{scale}x"
-            GifExporter.export_all_gifs(
-                std_grid=std_grid,
-                output_dir=dir_scaled_gifs,
-                stem=stem,
-                duration=gif_duration,
-            )
-            print(f"  [INFO] Exported {scale}x scaled motion GIFs to: {dir_scaled_gifs}/")
+    # 2. Scaled Resolution Deliverables (e.g. 4x High-Res Display & Preview)
+    dir_scaled = None
+    sheet_scaled_path = None
+    if scale > 1:
+        dir_scaled = output_dir / f"{scale}x"
+        dir_scaled.mkdir(parents=True, exist_ok=True)
+        sheet_scaled_path = dir_scaled / f"{stem}_pixel_sheet.png"
+        packed_sheet.save(sheet_scaled_path)
+        json_scaled_path = dir_scaled / f"{stem}_metadata.json"
+        with open(json_scaled_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+        print(f"  [SUCCESS] Output {scale}x Scaled Sprite Sheet: {sheet_scaled_path}")
 
-        if export_1x and scale > 1 and std_grid_1x is not None:
-            dir_1x_gifs = output_dir / "1x"
-            GifExporter.export_all_gifs(
-                std_grid=std_grid_1x,
-                output_dir=dir_1x_gifs,
+        # Scaled Frames
+        if export_frames and std_grid:
+            frames_scaled_dir = dir_scaled / f"{stem}_frames"
+            export_frame_grid_by_motion(std_grid, frames_scaled_dir, stem=stem)
+            print(f"  [INFO] Exported {scale}x scaled frames to: {frames_scaled_dir}/")
+
+        # Scaled GIFs (placed inside {stem}_gifs/ subfolder)
+        if export_gifs and std_grid:
+            gifs_scaled_dir = dir_scaled / f"{stem}_gifs"
+            gif_res_scaled = GifExporter.export_all_gifs(
+                std_grid=std_grid,
+                output_dir=gifs_scaled_dir,
                 stem=stem,
                 duration=gif_duration,
             )
-            print(f"  [INFO] Exported 1x native motion GIFs to: {dir_1x_gifs}/")
+            print(f"  [INFO] Exported {scale}x scaled motion GIFs to: {gifs_scaled_dir}/")
 
     # Run deterministic quality audit
+    primary_sheet_img = packed_sheet if scale > 1 else sheet_1x_to_save
+    primary_metadata = metadata if scale > 1 else metadata_1x_to_save
+    primary_sheet_path = sheet_scaled_path if (scale > 1 and sheet_scaled_path) else sheet_1x_path
+
     audit_metric = QualityAuditor.audit_single(
         src_img=raw_img,
-        sheet_img=packed_sheet,
-        metadata=metadata,
+        sheet_img=primary_sheet_img,
+        metadata=primary_metadata,
         name=stem,
     )
 
     return {
         "status": "success",
         "input": str(input_path),
-        "sheet": str(sheet_path),
+        "sheet": str(primary_sheet_path),
         "rows": n_rows,
         "total_frames": total_frames,
         "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}",

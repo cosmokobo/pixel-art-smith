@@ -133,34 +133,31 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 
 ## 📦 생성 결과물 구조 (Output Artifacts)
 
-변환 완료 시 지정된 출력 디렉토리에 다음 파일들이 대칭적으로 체계화되어 생성됩니다:
+변환 완료 시 지정된 출력 디렉토리에 중복 없이 체계화되어 생성됩니다:
 
 ```
 output_dir/
-├── hero_pixel_sheet.png        # 🖥️ 루트 디스플레이용 픽셀아트 스프라이트 시트 (PNG)
-├── hero_metadata.json          # 루트 메타데이터
-├── hero_all_motions.gif        # 🎬 전방향 통합 애니메이션 프리뷰 GIF
-├── hero_motion_00_down.gif     # 🎬 개별 동작 애니메이션 GIF (Down)
-├── hero_motion_01_left.gif     # 🎬 개별 동작 애니메이션 GIF (Left)
-├── hero_motion_02_right.gif    # 🎬 개별 동작 애니메이션 GIF (Right)
-├── hero_motion_03_up.gif       # 🎬 개별 동작 애니메이션 GIF (Up)
 ├── 1x/                         # 🎮 게임 엔진 직접 임포트용 1배(1x) 원본 규격 폴더
-│   ├── hero_pixel_sheet.png    # 32x32 1배(1x) 원본 규격 시트 (128x128 / 160x128)
+│   ├── hero_pixel_sheet.png    # 32x32 1배(1x) 원본 규격 시트 (128x128 / 136x136)
 │   ├── hero_metadata.json      # 1배(1x) 기준 메타데이터
-│   ├── hero_all_motions.gif    # 1배(1x) 통합 애니메이션 GIF
-│   ├── hero_motion_*.gif       # 1배(1x) 개별 동작 애니메이션 GIF
-│   └── hero_frames/            # (--export-frames 옵션 시 1배 낱장 프레임)
+│   ├── hero_frames/            # 1배(1x) 낱장 프레임 (모션별 서브폴더 + 플랫)
+│   │   ├── motion_00_down/
+│   │   │   ├── frame_00.png
+│   │   │   └── ...
+│   │   └── motion_00_down_frame_00.png
+│   └── hero_gifs/              # 1배(1x) 애니메이션 GIF
+│       ├── hero_all_motions.gif    # 1배(1x) 통합 프리뷰 GIF
+│       ├── hero_motion_00_down.gif # 1배(1x) 개별 동작 GIF
+│       └── ...
 ├── 4x/                         # 🖼️ 고해상도 4배율(4x) 디스플레이 전용 폴더
-│   ├── hero_pixel_sheet.png    # 4배율(4x) 고화질 시트 (512x512 / 640x512)
+│   ├── hero_pixel_sheet.png    # 4배율(4x) 고화질 시트 (512x512 / 544x544)
 │   ├── hero_metadata.json      # 4배율(4x) 기준 메타데이터
-│   ├── hero_all_motions.gif    # 4배율(4x) 통합 애니메이션 GIF
-│   ├── hero_motion_*.gif       # 4배율(4x) 개별 동작 애니메이션 GIF
-│   └── hero_frames/            # (--export-frames 옵션 시 4배 낱장 프레임)
-├── hero_frames/                # (--export-frames 옵션 시 루트 낱장 프레임)
-│   ├── motion_00_frame_00.png  # (Down - Frame 0)
-│   ├── motion_00_frame_01.png  # (Down - Frame 1)
-│   └── ...
-└── result.md                   # 100% 코어 보존율 및 품질 감사 종합 보고서
+│   ├── hero_frames/            # 4배율(4x) 낱장 프레임 (모션별 서브폴더 + 플랫)
+│   └── hero_gifs/              # 4배율(4x) 애니메이션 GIF
+│       ├── hero_all_motions.gif    # 4배율(4x) 통합 프리뷰 GIF
+│       ├── hero_motion_00_down.gif # 4배율(4x) 개별 동작 GIF
+│       └── ...
+└── result.md                   # 📊 100% 코어 보존율 및 품질 감사 종합 보고서
 ```
 
 ---
