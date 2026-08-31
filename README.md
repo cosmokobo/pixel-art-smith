@@ -104,6 +104,8 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 | **`-k`, `--max-colors`** | `int` | `16` | 캐릭터 전경(Foreground)에 할당할 최대 색상 수 (기본: 16). |
 | **`-s`, `--scale`** | `int` | `4` | **최종 출력 디스플레이 확대 배율** (최근방 이웃 보간):<br>• `1`: 네이티브 논리 픽셀 크기 ($128\times 128$ 등)<br>• `2`: 2배율 확대 ($256\times 256$ 등)<br>• `4`: 4배율 표준 확대 ($512\times 512$ 등)<br>• `8`: 8배율 고해상도 확대 ($1024\times 1024$ 등) |
 | **`--export-1x`** | `bool` | `True` | **게임 엔진용 1배(1x) 원본 규격 스프라이트 시트 및 메타데이터를 `1x/` 하위 폴더에 동시 생성** (`--no-export-1x`로 비활성화 가능). |
+| **`--export-gifs`** | `bool` | `True` | **방향/동작별 개별 애니메이션 GIF 및 전방향 통합 프리뷰 GIF 동시 생성** (`--no-export-gifs`로 비활성화 가능). |
+| **`--gif-duration`** | `int` | `150` | 애니메이션 GIF 프레임당 노출 시간 (ms 단위, 기본: 150ms). |
 | **`--export-frames`** | `flag` | `False` | 시트 외에 **개별 모션 프레임 낱장 PNG 파일들을 하위 폴더(`_frames/`)에 동시 분할 저장**. |
 | **`--clean-orphans`** | `flag` | `False` | $1\text{px}$ 크기의 고립된 단일 노이즈 픽셀 자동 제거. |
 | **`--no-bg-remove`** | `flag` | `False` | 배경 투명화 제거를 건너뛰고 원본 배경색을 그대로 유지. |
@@ -137,13 +139,22 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 output_dir/
 ├── hero_pixel_sheet.png        # 🖥️ 루트 디스플레이용 픽셀아트 스프라이트 시트 (PNG)
 ├── hero_metadata.json          # 루트 메타데이터
+├── hero_all_motions.gif        # 🎬 전방향 통합 애니메이션 프리뷰 GIF
+├── hero_motion_00_down.gif     # 🎬 개별 동작 애니메이션 GIF (Down)
+├── hero_motion_01_left.gif     # 🎬 개별 동작 애니메이션 GIF (Left)
+├── hero_motion_02_right.gif    # 🎬 개별 동작 애니메이션 GIF (Right)
+├── hero_motion_03_up.gif       # 🎬 개별 동작 애니메이션 GIF (Up)
 ├── 1x/                         # 🎮 게임 엔진 직접 임포트용 1배(1x) 원본 규격 폴더
 │   ├── hero_pixel_sheet.png    # 32x32 1배(1x) 원본 규격 시트 (128x128 / 160x128)
 │   ├── hero_metadata.json      # 1배(1x) 기준 메타데이터
+│   ├── hero_all_motions.gif    # 1배(1x) 통합 애니메이션 GIF
+│   ├── hero_motion_*.gif       # 1배(1x) 개별 동작 애니메이션 GIF
 │   └── hero_frames/            # (--export-frames 옵션 시 1배 낱장 프레임)
 ├── 4x/                         # 🖼️ 고해상도 4배율(4x) 디스플레이 전용 폴더
 │   ├── hero_pixel_sheet.png    # 4배율(4x) 고화질 시트 (512x512 / 640x512)
 │   ├── hero_metadata.json      # 4배율(4x) 기준 메타데이터
+│   ├── hero_all_motions.gif    # 4배율(4x) 통합 애니메이션 GIF
+│   ├── hero_motion_*.gif       # 4배율(4x) 개별 동작 애니메이션 GIF
 │   └── hero_frames/            # (--export-frames 옵션 시 4배 낱장 프레임)
 ├── hero_frames/                # (--export-frames 옵션 시 루트 낱장 프레임)
 │   ├── motion_00_frame_00.png  # (Down - Frame 0)

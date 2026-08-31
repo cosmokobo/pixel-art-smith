@@ -14,13 +14,13 @@ class BackgroundRemover:
         grid_arr: np.ndarray,
         bg_diff_thresh: int = 6,
         max_cavity_area: int = 40,
+        resolve_cavities: bool = False,
     ) -> tuple[np.ndarray, np.ndarray, int]:
-        """Segment background including enclosed cavities (e.g. gaps between hair loops/twintails and body).
+        """Segment background using non-leaking 4-connected floodfill from perimeter edges.
 
         1. Samples canvas background color dynamically from perimeter medians.
         2. Applies 4-connected floodfill from border edges (outer perimeter background).
-        3. Identifies candidate enclosed background cavities (connected components with exact background color).
-        4. Analyzes boundary contrast to distinguish genuine background cavities from character interior elements.
+        3. Preserves internal character elements (white clothing, aprons, frills, eyes, skin).
 
         Returns:
             (bg_mask, fg_mask, resolved_cavity_pixel_count)
@@ -56,36 +56,33 @@ class BackgroundRemover:
             cv2.floodFill(bgr.copy(), mask, pt, 255, diff, diff, flags=flags)
 
         outer_bg_mask = mask[1 : target_h + 1, 1 : target_w + 1] == 255
-
-        # 3. Identify candidate enclosed background cavities (unfilled pixels matching pure background color)
-        color_diff = np.max(np.abs(grid_arr.astype(int) - bg_color.astype(int)), axis=-1)
-        is_pure_bg_color = color_diff <= bg_diff_thresh
-        candidate_trapped = (~outer_bg_mask) & is_pure_bg_color
-
-        trapped_u8 = (candidate_trapped.astype(np.uint8)) * 255
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(trapped_u8, connectivity=8)
-
         enclosed_bg_mask = np.zeros((target_h, target_w), dtype=bool)
 
-        for i in range(1, num_labels):
-            comp_mask = labels == i
-            area = stats[i, cv2.CC_STAT_AREA]
+        # 3. Optional resolution of enclosed background cavities (only if explicitly enabled)
+        if resolve_cavities:
+            color_diff = np.max(np.abs(grid_arr.astype(int) - bg_color.astype(int)), axis=-1)
+            is_pure_bg_color = color_diff <= bg_diff_thresh
+            candidate_trapped = (~outer_bg_mask) & is_pure_bg_color
 
-            # Analyze surrounding 1px boundary
-            dilated = cv2.dilate(comp_mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1).astype(bool)
-            perimeter = dilated & (~comp_mask)
-            perimeter_rgbs = grid_arr[perimeter]
+            trapped_u8 = (candidate_trapped.astype(np.uint8)) * 255
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(trapped_u8, connectivity=8)
 
-            if len(perimeter_rgbs) == 0:
-                continue
+            for i in range(1, num_labels):
+                comp_mask = labels == i
+                area = stats[i, cv2.CC_STAT_AREA]
 
-            # Check boundary contrast against background color
-            perim_diffs = np.max(np.abs(perimeter_rgbs.astype(int) - bg_color.astype(int)), axis=-1)
-            non_bg_fraction = np.mean(perim_diffs > 10)
+                dilated = cv2.dilate(comp_mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1).astype(bool)
+                perimeter = dilated & (~comp_mask)
+                perimeter_rgbs = grid_arr[perimeter]
 
-            # If component is pure background color and bordered by character outlines/features:
-            if non_bg_fraction > 0.35 or area <= max_cavity_area:
-                enclosed_bg_mask |= comp_mask
+                if len(perimeter_rgbs) == 0:
+                    continue
+
+                perim_diffs = np.max(np.abs(perimeter_rgbs.astype(int) - bg_color.astype(int)), axis=-1)
+                non_bg_fraction = np.mean(perim_diffs > 10)
+
+                if non_bg_fraction > 0.85 and area <= max_cavity_area:
+                    enclosed_bg_mask |= comp_mask
 
         final_bg_mask = outer_bg_mask | enclosed_bg_mask
         final_fg_mask = ~final_bg_mask

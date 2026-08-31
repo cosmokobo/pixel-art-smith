@@ -27,7 +27,7 @@ class SpriteIsolator:
     def detect_matrix_layout(grid_img: Image.Image) -> tuple[str, int, int]:
         """Detect whether the image is a Motion Matrix Sprite Sheet (Track A: 4x4 or 4x5) or Snapper-Parity Canvas (Track B).
 
-        Uses 2D Matrix Energy Variance and Cell Density to identify 4x4 vs 4x5 motion sheets.
+        Uses 2D Matrix Energy, Boundary Cut Penalties, and Aspect Ratio to identify 4x4 vs 4x5 motion sheets.
         Returns:
             (mode: "sheet" | "canvas", rows: int, cols: int)
         """
@@ -35,31 +35,59 @@ class SpriteIsolator:
         alpha = arr[:, :, 3]
         h, w = alpha.shape
 
-        # 1. Check if all 4 motion rows (0..32, 32..64, 64..96, 96..128) contain active characters
-        row_energies = [int(np.sum(alpha[r * 32 : (r + 1) * 32, :] > 0)) for r in range(4)]
-        if any(e < 150 for e in row_energies):
+        # 1. Check if all 4 motion rows contain active characters
+        row_energies = [
+            int(np.sum(alpha[int(round(r * h / 4)) : int(round((r + 1) * h / 4)), :] > 0))
+            for r in range(4)
+        ]
+        if any(e < 100 for e in row_energies):
             return "canvas", 1, 1
 
-        # 2. Check 4x5 Matrix Energy
+        # 2. Check 4x4 Matrix Energy and boundary cut penalty
+        m4 = []
+        for r in range(4):
+            cols = [
+                int(
+                    np.sum(
+                        alpha[
+                            int(round(r * h / 4)) : int(round((r + 1) * h / 4)),
+                            int(round(c * w / 4)) : int(round((c + 1) * w / 4)),
+                        ]
+                        > 0
+                    )
+                )
+                for c in range(4)
+            ]
+            m4.append(cols)
+        m4_arr = np.array(m4)
+        cut_4 = sum(int(np.sum(alpha[:, int(round(c * w / 4))] > 0)) for c in range(1, 4))
+
+        # 3. Check 4x5 Matrix Energy and boundary cut penalty
         m5 = []
         for r in range(4):
             cols = [
-                int(np.sum(alpha[r * 32 : (r + 1) * 32, int(round(c * w / 5)) : int(round((c + 1) * w / 5))] > 0))
+                int(
+                    np.sum(
+                        alpha[
+                            int(round(r * h / 4)) : int(round((r + 1) * h / 4)),
+                            int(round(c * w / 5)) : int(round((c + 1) * w / 5)),
+                        ]
+                        > 0
+                    )
+                )
                 for c in range(5)
             ]
             m5.append(cols)
         m5_arr = np.array(m5)
+        cut_5 = sum(int(np.sum(alpha[:, int(round(c * w / 5))] > 0)) for c in range(1, 5))
 
-        # 3. Check 4x4 Matrix Energy
-        m4 = []
-        for r in range(4):
-            cols = [int(np.sum(alpha[r * 32 : (r + 1) * 32, c * 32 : (c + 1) * 32] > 0)) for c in range(4)]
-            m4.append(cols)
-        m4_arr = np.array(m4)
-
-        # 4. Determine best-fit matrix (4x4 vs 4x5) based on intra-row variance and cell coverage
-        if np.all(m5_arr >= 30) and np.std(m5_arr, axis=1).mean() < np.std(m4_arr, axis=1).mean():
-            return "sheet", 4, 5
+        # 4. Determine best-fit matrix based on boundary cut penalty and active cells
+        if np.all(m4_arr >= 30) and np.all(m5_arr >= 30):
+            # Both have active cells: check boundary cut penalty (grid lines passing through characters vs empty gaps)
+            if cut_4 <= cut_5:
+                return "sheet", 4, 4
+            else:
+                return "sheet", 4, 5
         elif np.all(m4_arr >= 30):
             return "sheet", 4, 4
         elif np.all(m5_arr >= 30):

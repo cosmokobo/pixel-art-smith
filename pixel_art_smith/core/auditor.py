@@ -206,6 +206,8 @@ class QualityAuditor:
         for m in metrics:
             lines.append(f"│   ├── {m.name}_pixel_sheet.png")
             lines.append(f"│   ├── {m.name}_metadata.json")
+            lines.append(f"│   ├── {m.name}_all_motions.gif")
+            lines.append(f"│   └── {m.name}_motion_*.gif")
 
         lines.extend(
             [
@@ -215,6 +217,8 @@ class QualityAuditor:
         for m in metrics:
             lines.append(f"│   ├── {m.name}_pixel_sheet.png")
             lines.append(f"│   ├── {m.name}_metadata.json")
+            lines.append(f"│   ├── {m.name}_all_motions.gif")
+            lines.append(f"│   └── {m.name}_motion_*.gif")
 
         lines.extend(
             [

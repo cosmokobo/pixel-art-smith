@@ -12,6 +12,7 @@ from PIL import Image
 from ..core.auditor import AuditMetric, QualityAuditor
 from ..core.bg_remover import BackgroundRemover
 from ..core.cleaner import PixelCleaner
+from ..core.gif_exporter import GifExporter
 from ..core.grid_detector import GridDetector
 from ..core.packer import SpritePacker
 from ..core.palette import PALETTES, hex_to_rgb
@@ -42,6 +43,8 @@ def process_single_image(
     remove_bg: bool = True,
     clean_orphans: bool = False,
     export_frames: bool = False,
+    export_gifs: bool = True,
+    gif_duration: int = 150,
     export_1x: bool = True,
     expected_rows: int | None = None,
     expected_cols: int | None = None,
@@ -212,6 +215,8 @@ def process_single_image(
     if export_frames:
         frames_dir = output_dir / f"{stem}_frames"
         frames_dir.mkdir(exist_ok=True)
+        for old_f in frames_dir.glob("motion_*.png"):
+            old_f.unlink()
         for r_idx, row in enumerate(std_grid):
             for c_idx, frame_img in enumerate(row):
                 frame_path = frames_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
@@ -221,6 +226,8 @@ def process_single_image(
         if scale > 1:
             frames_scaled_dir = output_dir / f"{scale}x" / f"{stem}_frames"
             frames_scaled_dir.mkdir(parents=True, exist_ok=True)
+            for old_f in frames_scaled_dir.glob("motion_*.png"):
+                old_f.unlink()
             for r_idx, row in enumerate(std_grid):
                 for c_idx, frame_img in enumerate(row):
                     frame_path = frames_scaled_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
@@ -230,11 +237,45 @@ def process_single_image(
         if export_1x and scale > 1 and std_grid_1x is not None:
             frames_1x_dir = output_dir / "1x" / f"{stem}_frames"
             frames_1x_dir.mkdir(parents=True, exist_ok=True)
+            for old_f in frames_1x_dir.glob("motion_*.png"):
+                old_f.unlink()
             for r_idx, row in enumerate(std_grid_1x):
                 for c_idx, frame_img in enumerate(row):
                     frame_path = frames_1x_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
                     frame_img.save(frame_path)
             print(f"  [INFO] Exported individual 1x frames to: {frames_1x_dir}/")
+
+    # Export Animated GIFs (individual motion GIFs + all-motions composite GIF)
+    if export_gifs and std_grid:
+        gif_res = GifExporter.export_all_gifs(
+            std_grid=std_grid,
+            output_dir=output_dir,
+            stem=stem,
+            duration=gif_duration,
+        )
+        print(
+            f"  [INFO] Exported {len(gif_res['individual_gifs'])} motion GIF(s) and composite preview to: {output_dir}/"
+        )
+
+        if scale > 1:
+            dir_scaled_gifs = output_dir / f"{scale}x"
+            GifExporter.export_all_gifs(
+                std_grid=std_grid,
+                output_dir=dir_scaled_gifs,
+                stem=stem,
+                duration=gif_duration,
+            )
+            print(f"  [INFO] Exported {scale}x scaled motion GIFs to: {dir_scaled_gifs}/")
+
+        if export_1x and scale > 1 and std_grid_1x is not None:
+            dir_1x_gifs = output_dir / "1x"
+            GifExporter.export_all_gifs(
+                std_grid=std_grid_1x,
+                output_dir=dir_1x_gifs,
+                stem=stem,
+                duration=gif_duration,
+            )
+            print(f"  [INFO] Exported 1x native motion GIFs to: {dir_1x_gifs}/")
 
     # Run deterministic quality audit
     audit_metric = QualityAuditor.audit_single(
@@ -293,6 +334,18 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
     parser.add_argument("--export-frames", action="store_true", help="Export individual standardized frame PNGs.")
     parser.add_argument(
+        "--export-gifs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export per-motion animated GIFs and composite preview GIF (default: True).",
+    )
+    parser.add_argument(
+        "--gif-duration",
+        type=int,
+        default=150,
+        help="Frame duration in ms for animated GIFs (default: 150ms).",
+    )
+    parser.add_argument(
         "--export-1x",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -339,7 +392,7 @@ def main_cli(args: list[str] | None = None) -> int:
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
     print(
-        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x}"
+        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x} | Export GIFs: {parsed.export_gifs}"
     )
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
@@ -361,6 +414,8 @@ def main_cli(args: list[str] | None = None) -> int:
                 remove_bg=not parsed.no_bg_remove,
                 clean_orphans=parsed.clean_orphans,
                 export_frames=parsed.export_frames,
+                export_gifs=parsed.export_gifs,
+                gif_duration=parsed.gif_duration,
                 export_1x=parsed.export_1x,
             )
             if res.get("status") == "success":

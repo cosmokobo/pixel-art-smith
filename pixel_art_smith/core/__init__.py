@@ -4,6 +4,7 @@
 from .auditor import AuditMetric, QualityAuditor
 from .bg_remover import BackgroundRemover
 from .cleaner import PixelCleaner
+from .gif_exporter import GifExporter
 from .grid_detector import GridDetector
 from .packer import SpritePacker
 from .palette import PALETTES, PaletteQuantizer, hex_to_rgb, rgb_to_hex
@@ -24,4 +25,5 @@ __all__ = [
     "PixelPosterizer",
     "QualityAuditor",
     "AuditMetric",
+    "GifExporter",
 ]
