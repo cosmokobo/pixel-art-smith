@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PixelArtSmith Core Module."""
 
 from .auditor import AuditMetric, QualityAuditor
@@ -13,17 +12,17 @@ from .sprite_isolator import FrameItem, SpriteIsolator
 
 __all__ = [
     "PALETTES",
-    "PaletteQuantizer",
-    "hex_to_rgb",
-    "rgb_to_hex",
+    "AuditMetric",
     "BackgroundRemover",
-    "GridDetector",
-    "SpriteIsolator",
     "FrameItem",
+    "GifExporter",
+    "GridDetector",
+    "PaletteQuantizer",
     "PixelCleaner",
-    "SpritePacker",
     "PixelPosterizer",
     "QualityAuditor",
-    "AuditMetric",
-    "GifExporter",
+    "SpriteIsolator",
+    "SpritePacker",
+    "hex_to_rgb",
+    "rgb_to_hex",
 ]

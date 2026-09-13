@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Animated GIF Exporter for Sprite Sheet Motions and Composite Previews."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from PIL import Image
@@ -11,7 +10,7 @@ from PIL import Image
 class GifExporter:
     """Exports standardized sprite frames into per-motion and composite animated GIFs."""
 
-    MOTION_NAMES_4DIR = ["down", "left", "right", "up"]
+    MOTION_NAMES_4DIR: ClassVar[tuple[str, ...]] = ("down", "left", "right", "up")
 
     @staticmethod
     def _convert_to_gif_frame(img: Image.Image, transparent: bool = True) -> Image.Image:
@@ -34,7 +33,8 @@ class GifExporter:
         p_arr[np.array(alpha) == 0] = 255
 
         p_out = Image.fromarray(p_arr, "P")
-        palette = p_img.getpalette()[: 255 * 3] + [0, 0, 0]
+        raw_palette = p_img.getpalette() or []
+        palette = raw_palette[: 255 * 3] + [0, 0, 0]
         p_out.putpalette(palette)
         p_out.info["transparency"] = 255
         p_out.info["disposal"] = 2

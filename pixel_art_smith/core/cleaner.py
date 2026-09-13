@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pixel art heuristic cleanup: 8-connectivity non-destructive orphan pixel cleanup."""
 
 import cv2
@@ -21,9 +20,9 @@ class PixelCleaner:
         mask = (alpha > 0).astype(np.uint8)
 
         # Full 8-connected kernel (checks all orthogonal and diagonal neighbors)
-        kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
+        kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.float32)
 
-        neighbor_count = cv2.filter2D(mask, -1, kernel, borderType=cv2.BORDER_CONSTANT)
+        neighbor_count = cv2.filter2D(mask.astype(np.float32), -1, kernel, borderType=cv2.BORDER_CONSTANT)
 
         # Truly isolated dot: opaque (mask == 1) but has 0 neighbors in all 8 directions
         orphan_mask = (mask == 1) & (neighbor_count == 0)

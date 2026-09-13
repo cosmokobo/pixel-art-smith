@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Deterministic Quality Auditor and Markdown Report Generator for PixelArtSmith."""
 
 from dataclasses import dataclass
@@ -123,7 +122,7 @@ class QualityAuditor:
     ) -> Path:
         """Generate a user-friendly, highly visual Markdown summary report with 1x/4x deliverables and Mermaid diagrams."""
         report_path = output_dir / report_name
-        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
         total_count = len(metrics)
         pass_count = sum(1 for m in metrics if "PASS" in m.verdict)

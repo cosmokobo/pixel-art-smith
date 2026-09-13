@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pixel art color palettes and Feature-Guarded CIELAB color quantization."""
 
 import cv2
@@ -526,7 +525,7 @@ class PaletteQuantizer:
 
         Preserves alpha channel transparency (A=0 stays transparent).
         """
-        if self._palette_rgb is None or len(self._palette_rgb) == 0:
+        if self._palette_rgb is None or self._palette_lab is None or len(self._palette_rgb) == 0:
             return img
 
         arr = np.array(img.convert("RGBA"))

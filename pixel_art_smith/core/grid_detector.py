@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pixel scale auto-detection and Core-Subblock Sampling Downsampler (Zero-Bleed)."""
 
 import numpy as np
@@ -12,7 +11,6 @@ class GridDetector:
     def estimate_pixel_pitch(img: Image.Image, min_pitch: int = 4, max_pitch: int = 16) -> int:
         """Estimate the pseudo-pixel block pitch (in raw pixels) using edge autocorrelation."""
         gray = np.array(img.convert("L"))
-        h, w = gray.shape
 
         # Horizontal gradient differences
         diff_x = np.abs(gray[:, 1:].astype(float) - gray[:, :-1].astype(float))

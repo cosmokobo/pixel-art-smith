@@ -36,6 +36,11 @@ ENV/
 env.bak/
 venv.bak/
 
+# Testing and linting caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
 # Rembg cache / model weights
 .u2net/
 

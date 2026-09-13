@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """AI & Deterministic Background Removal with Zero-Leakage 4-Connected Quantized FloodFill."""
 
 import cv2
@@ -65,7 +64,7 @@ class BackgroundRemover:
             candidate_trapped = (~outer_bg_mask) & is_pure_bg_color
 
             trapped_u8 = (candidate_trapped.astype(np.uint8)) * 255
-            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(trapped_u8, connectivity=8)
+            num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(trapped_u8, connectivity=8)
 
             for i in range(1, num_labels):
                 comp_mask = labels == i
@@ -96,7 +95,7 @@ class BackgroundRemover:
         arr = np.array(quant_img.convert("RGB"))
         h, w = arr.shape[:2]
 
-        bg_mask, fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(arr)
+        bg_mask, _fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(arr)
 
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
         rgba[:, :, :3] = arr

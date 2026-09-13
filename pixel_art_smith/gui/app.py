@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Modern Desktop GUI Studio for PixelArtSmith with Animation Player, Grid Modes & Adaptive Palette Slider."""
 
 import json
@@ -15,7 +14,7 @@ try:
     GUI_BACKEND = "customtkinter"
 except ImportError:
     import tkinter as ctk
-    import tkinter.ttk as ttk
+    from tkinter import ttk
 
     GUI_BACKEND = "tkinter"
 
@@ -24,11 +23,12 @@ from tkinter import filedialog, messagebox
 
 from ..core.bg_remover import BackgroundRemover
 from ..core.cleaner import PixelCleaner
+from ..core.gif_exporter import GifExporter
 from ..core.grid_detector import GridDetector
 from ..core.packer import SpritePacker
 from ..core.palette import PALETTES, hex_to_rgb
 from ..core.posterizer import PixelPosterizer
-from ..core.sprite_isolator import SpriteIsolator
+from ..core.sprite_isolator import FrameItem, SpriteIsolator
 
 
 class PixelArtSmithApp:
@@ -46,7 +46,6 @@ class PixelArtSmithApp:
         self.processed_sheet: Image.Image | None = None
         self.std_grid: list[list[Image.Image]] = []
         self.metadata: dict[str, Any] = {}
-        self.bg_remover = BackgroundRemover()
 
         # Animation Player State
         self.anim_running = False
@@ -191,25 +190,32 @@ class PixelArtSmithApp:
         # Quick Preset Buttons: 8, 16, 32, 64
         if GUI_BACKEND == "customtkinter":
             btn_box = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            def _make_cmd(val: int):
+                return lambda: self._set_color_slider(val)
+
             for c_val in [8, 16, 32, 64]:
                 btn = ctk.CTkButton(
                     btn_box,
                     text=f"{c_val}c",
-                    width=55,
+                    width=44,
                     height=24,
                     font=ctk.CTkFont(size=11),
-                    command=lambda v=c_val: self._set_color_slider(v),
+                    command=_make_cmd(c_val),
                 )
                 btn.pack(side="left", padx=3)
         else:
             btn_box = tk.Frame(self.sidebar, bg="#242424")
+
+            def _make_tk_cmd(val: int):
+                return lambda: self._set_color_slider(val)
+
             for c_val in [8, 16, 32, 64]:
                 btn = tk.Button(
                     btn_box,
                     text=f"{c_val}c",
                     width=4,
                     font=("Helvetica", 9),
-                    command=lambda v=c_val: self._set_color_slider(v),
+                    command=_make_tk_cmd(c_val),
                 )
                 btn.pack(side="left", padx=2)
         btn_box.pack(padx=15, pady=(2, 8), fill="x")
@@ -468,6 +474,7 @@ class PixelArtSmithApp:
 
         def task():
             try:
+                assert self.raw_image is not None
                 palette_name = self._get_selected_palette_name()
                 grid_mode = self._get_selected_grid_mode()
                 scale_str = self.var_scale.get()
@@ -477,40 +484,65 @@ class PixelArtSmithApp:
                 max_colors = self.var_max_colors.get()
                 pitch = self._get_pitch_from_res_preset()
 
-                # 1. Background removal
-                if remove_bg:
-                    clean_bg_img = self.bg_remover.remove_background(self.raw_image, alpha_threshold=128, defringe=True)
-                else:
-                    clean_bg_img = PixelCleaner.cleanup_transparency_halos(self.raw_image)
+                raw_img = self.raw_image.convert("RGB")
 
-                # 2. Core sub-block sampling (zero-bleed)
+                # 1. Core sub-block sampling (zero-bleed)
                 margin = 1 if pitch >= 6 else 0
-                grid_img = GridDetector.core_subblock_downsample(clean_bg_img, pitch=pitch, margin=margin)
+                grid_img = GridDetector.core_subblock_downsample(raw_img, pitch=pitch, margin=margin)
+                grid_arr = np.array(grid_img)
+                target_h, target_w = grid_arr.shape[:2]
 
-                # 3. Clean orphan pixels
-                if clean_orphans:
-                    grid_img = PixelCleaner.remove_orphan_pixels(grid_img)
+                # 2. Background segmentation with cavity resolution
+                if remove_bg:
+                    bg_mask, fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(grid_arr)
+                else:
+                    bg_mask = np.zeros((target_h, target_w), dtype=bool)
+                    fg_mask = np.ones((target_h, target_w), dtype=bool)
 
-                # 4. Chroma-Weighted Semantic Quantization
+                # 3. Dedicated Foreground Semantic Palette Quantization
                 palette_colors: list[str] = []
-                if palette_name == "none" or palette_name.startswith("adaptive") or palette_name.startswith("snapper"):
-                    # Use adaptive semantic palette with slider's max_colors
+                fg_img = Image.fromarray(grid_arr[fg_mask].reshape(-1, 1, 3))
+                if palette_name.startswith(("adaptive", "snapper")) or palette_name in ("none", "default"):
                     n_c = int(palette_name.split("-")[1]) if "-" in palette_name else max_colors
-                    grid_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
-                        grid_img, max_colors=n_c, w_chroma=2.0
+                    quant_fg_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
+                        fg_img, max_colors=n_c, w_chroma=2.0
                     )
                 elif palette_name in PALETTES:
                     hex_list = PALETTES[palette_name]
                     if "#000000" not in hex_list and "#000000" not in [h.lower() for h in hex_list]:
                         hex_list = ["#000000"] + hex_list
                     palette_rgb = np.array([hex_to_rgb(h) for h in hex_list], dtype=np.uint8)
-                    grid_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
-                        grid_img, palette_rgb=palette_rgb, w_chroma=2.0
+                    quant_fg_img, palette_colors = PixelPosterizer.quantize_chroma_weighted(
+                        fg_img, palette_rgb=palette_rgb, w_chroma=2.0
+                    )
+                else:
+                    quant_fg_img, palette_colors = PixelPosterizer.process_snapper_pipeline(
+                        fg_img, max_colors=max_colors
                     )
 
+                quant_fg_arr = np.array(quant_fg_img).reshape(-1, 3)
+
+                clean_arr = np.zeros((target_h, target_w, 4), dtype=np.uint8)
+                clean_arr[fg_mask, :3] = quant_fg_arr
+                clean_arr[fg_mask, 3] = 255
+                clean_arr[bg_mask, :3] = grid_arr[bg_mask]
+                clean_arr[bg_mask, 3] = 0 if remove_bg else 255
+
+                clean_img = Image.fromarray(clean_arr, "RGBA")
+
+                # 4. Clean orphan pixels
+                if clean_orphans:
+                    clean_img = PixelCleaner.remove_orphan_pixels(clean_img)
+
                 # 5. 2D Matrix isolation & Grid Mode resolution
-                isolator = SpriteIsolator(min_area=12, padding=1)
-                matrix = isolator.isolate_matrix(grid_img)
+                detected_mode, auto_rows, auto_cols = SpriteIsolator.detect_matrix_layout(clean_img)
+                force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas")
+
+                if detected_mode == "sheet" and not force_canvas:
+                    isolator = SpriteIsolator(min_area=12, padding=1)
+                    matrix = isolator.isolate_matrix(clean_img, expected_rows=auto_rows, expected_cols=auto_cols)
+                else:
+                    matrix = [[FrameItem(clean_img, (0, 0, clean_img.width, clean_img.height), row=0, col=0)]]
 
                 cell_size = SpritePacker.resolve_cell_size(matrix, grid_mode=grid_mode)
 
@@ -539,7 +571,7 @@ class PixelArtSmithApp:
                         grid_mode,
                     ),
                 )
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001
                 err_msg = str(ex)
                 self.root.after(0, lambda: self._on_process_error(err_msg))
 
@@ -580,7 +612,7 @@ class PixelArtSmithApp:
     def _on_motion_change(self, val: str):
         try:
             self.anim_motion_idx = int(val.split()[2])
-        except Exception:
+        except (IndexError, ValueError):
             self.anim_motion_idx = 0
         self.anim_frame_idx = 0
         self._render_current_anim_frame()
@@ -630,24 +662,40 @@ class PixelArtSmithApp:
             messagebox.showwarning("Warning", "No processed sprite sheet to export.")
             return
 
-        out_path = filedialog.asksaveasfilename(
+        out_path_str = filedialog.asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG Image", "*.png")],
             initialfile=f"{self.current_image_path.stem if self.current_image_path else 'sprite'}_pixel_sheet.png",
         )
-        if not out_path:
+        if not out_path_str:
             return
 
-        out_path = Path(out_path)
+        out_path = Path(out_path_str)
         self.processed_sheet.save(out_path)
 
         meta_path = out_path.with_suffix(".json")
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, indent=2)
 
+        export_details = [f"- Matrix Sheet: {out_path.name}", f"- Agentic Metadata: {meta_path.name}"]
+
+        if self.std_grid:
+            try:
+                stem = out_path.stem.replace("_pixel_sheet", "")
+                gifs_dir = out_path.parent / f"{stem}_gifs"
+                GifExporter.export_all_gifs(
+                    std_grid=self.std_grid,
+                    output_dir=gifs_dir,
+                    stem=stem,
+                    duration=150,
+                )
+                export_details.append(f"- Animated GIFs: {gifs_dir.name}/")
+            except Exception as ex:  # noqa: BLE001
+                print(f"[WARN] Failed to export GIFs in GUI: {ex}")
+
         messagebox.showinfo(
             "Export Success",
-            f"Successfully exported:\n- Matrix Sheet: {out_path.name}\n- Agentic Metadata: {meta_path.name}",
+            "Successfully exported:\n" + "\n".join(export_details),
         )
 
     def _show_on_canvas(self, canvas: tk.Canvas, pil_img: Image.Image, scale_zoom: float = 1.0):
@@ -664,7 +712,7 @@ class PixelArtSmithApp:
         photo = ImageTk.PhotoImage(resized)
 
         canvas.delete("all")
-        canvas.image = photo
+        canvas.image = photo  # type: ignore[attr-defined]
         canvas.create_image(cw // 2, ch // 2, image=photo, anchor="center")
 
 

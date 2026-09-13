@@ -18,7 +18,7 @@ def main():
 
             main_gui()
             return 0
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[WARN] GUI failed to start: {e}. Falling back to CLI help.", file=sys.stderr)
             return main_cli(["--help"])
 

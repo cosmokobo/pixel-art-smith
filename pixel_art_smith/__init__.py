@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PixelArtSmith Package - AI Sprite Sheet to Grid-Perfect Pixel Art Engine."""
 
 from .core.bg_remover import BackgroundRemover
@@ -10,10 +9,10 @@ from .core.sprite_isolator import SpriteIsolator
 
 __all__ = [
     "PALETTES",
-    "PaletteQuantizer",
     "BackgroundRemover",
     "GridDetector",
-    "SpriteIsolator",
+    "PaletteQuantizer",
     "PixelCleaner",
+    "SpriteIsolator",
     "SpritePacker",
 ]

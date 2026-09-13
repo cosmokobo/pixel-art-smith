@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Headless CLI Runner for PixelArtSmith with Snapper-Parity Sampling & Semantic Quantization."""
 
 import argparse
@@ -35,11 +34,12 @@ def export_frame_grid_by_motion(
     frame_grid: list[list[Image.Image]],
     target_dir: Path,
     stem: str = "",
-) -> None:
+) -> list[Path]:
     """Export individual frame PNGs organized by motion subfolders and tagged filenames."""
     target_dir.mkdir(parents=True, exist_ok=True)
     n_rows = len(frame_grid)
     direction_names = ["down", "left", "right", "up"]
+    exported: list[Path] = []
 
     for r_idx, row in enumerate(frame_grid):
         if n_rows == 4 and r_idx < len(direction_names):
@@ -55,10 +55,25 @@ def export_frame_grid_by_motion(
 
         for c_idx, frame_img in enumerate(row):
             # 1. Inside motion subfolder (e.g. motion_00_down/frame_00.png)
-            frame_img.save(sub_dir / f"frame_{c_idx:02d}.png")
+            p_sub = sub_dir / f"frame_{c_idx:02d}.png"
+            frame_img.save(p_sub)
+            exported.append(p_sub)
+
             # 2. In frames directory with direction-tagged and indexed names
-            frame_img.save(target_dir / f"{motion_tag}_frame_{c_idx:02d}.png")
-            frame_img.save(target_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png")
+            if stem:
+                p_stem = target_dir / f"{stem}_{motion_tag}_frame_{c_idx:02d}.png"
+                frame_img.save(p_stem)
+                exported.append(p_stem)
+
+            p_tag = target_dir / f"{motion_tag}_frame_{c_idx:02d}.png"
+            frame_img.save(p_tag)
+            exported.append(p_tag)
+
+            p_idx = target_dir / f"motion_{r_idx:02d}_frame_{c_idx:02d}.png"
+            frame_img.save(p_idx)
+            exported.append(p_idx)
+
+    return exported
 
 
 def process_single_image(
@@ -252,7 +267,7 @@ def process_single_image(
     # 1x GIFs (placed inside {stem}_gifs/ subfolder)
     if export_gifs and grid_1x_native:
         gifs_1x_dir = dir_1x / f"{stem}_gifs"
-        gif_res_1x = GifExporter.export_all_gifs(
+        GifExporter.export_all_gifs(
             std_grid=grid_1x_native,
             output_dir=gifs_1x_dir,
             stem=stem,
@@ -284,7 +299,7 @@ def process_single_image(
         # Scaled GIFs (placed inside {stem}_gifs/ subfolder)
         if export_gifs and std_grid:
             gifs_scaled_dir = dir_scaled / f"{stem}_gifs"
-            gif_res_scaled = GifExporter.export_all_gifs(
+            GifExporter.export_all_gifs(
                 std_grid=std_grid,
                 output_dir=gifs_scaled_dir,
                 stem=stem,
@@ -305,6 +320,7 @@ def process_single_image(
     )
 
     return {
+        "success": True,
         "status": "success",
         "input": str(input_path),
         "sheet": str(primary_sheet_path),
@@ -446,7 +462,7 @@ def main_cli(args: list[str] | None = None) -> int:
                 success_count += 1
                 if "audit_metric" in res:
                     audit_metrics.append(res["audit_metric"])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[ERROR] Failed to process {img_p.name}: {e}", file=sys.stderr)
 
     # Generate Markdown Quality Audit Report if any images were audited

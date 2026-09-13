@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Sprite Sheet Matrix Packer, Ground Alignment, Grid Modes, and Agentic AI Metadata."""
 
 from typing import Any
@@ -40,10 +39,8 @@ class SpritePacker:
         for row in matrix:
             for item in row:
                 w, h = item.image.size
-                if w > max_w:
-                    max_w = w
-                if h > max_h:
-                    max_h = h
+                max_w = max(max_w, w)
+                max_h = max(max_h, h)
 
         # Add 2px margin for breathing room and round up to multiple of 2
         cell_w = ((max_w + 3) // 2) * 2
@@ -66,7 +63,7 @@ class SpritePacker:
             parts = mode.replace("fixed-", "").split("x")
             try:
                 return int(parts[0]), int(parts[1])
-            except Exception:
+            except (ValueError, IndexError):
                 pass
         return SpritePacker.calculate_optimal_cell_size(matrix)
 

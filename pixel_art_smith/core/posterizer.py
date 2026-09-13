@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pure Semantic Palette Extraction & Chroma-Weighted CIELAB Quantization matching Snapper."""
 
 import cv2
@@ -119,7 +118,7 @@ class PixelPosterizer:
 
         km = KMeans(n_clusters=min(max_colors, len(np.unique(pixels, axis=0))), random_state=42, n_init=5)
         km.fit(pixels)
-        centers = np.uint8(np.clip(km.cluster_centers_, 0, 255))
+        centers: np.ndarray = np.clip(km.cluster_centers_, 0, 255).astype(np.uint8)
         labels = km.predict(pixels)
 
         quant_rgb = centers[labels]
@@ -128,7 +127,7 @@ class PixelPosterizer:
 
         palette_hex = [
             f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-            for c in sorted(centers, key=lambda c: (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114))
+            for c in sorted(centers, key=lambda c: float(c[0]) * 0.299 + float(c[1]) * 0.587 + float(c[2]) * 0.114)
         ]
 
         return Image.fromarray(output_arr, "RGBA" if has_alpha else "RGB"), palette_hex
