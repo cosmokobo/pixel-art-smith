@@ -64,11 +64,13 @@
 
 ### 2. 고속 배치 CLI 실행 (Headless CLI)
 ```bash
-# 단일 캐릭터 시트: 32x32 규격, Snapper-16 팔레트, 4배율 출력
+# 4방향 보행 시트: 32x32 규격, Snapper-16 팔레트, 4배율 출력 (시트 + 낱장 프레임 + GIF 자동 생성)
 ./run.sh /path/to/character.png -c 32x32 -p snapper-16 -s 4 -o ./output
 
-# 단일 아이템 / 프랍 / 무기 (1모션 1프레임, GIF/프레임폴더 생략)
-./run.sh /path/to/item_sword.png --item -s 4 -o ./output
+# 1모션 1프레임 정적 자산 (아이템, 무기, 아이콘, 초상화 - GIF 및 프레임 폴더 생략)
+./run.sh /path/to/sword.png --static -s 4 -o ./output
+# 또는 개별 플래그 지정:
+./run.sh /path/to/sword.png --no-gifs --no-frames --no-sheet -s 4 -o ./output
 
 # 디렉토리 일괄 변환 (Batch Processing)
 ./run.sh /path/to/raw_images_dir/ -c 32x32 -p snapper-16 -s 4 -o ./output
@@ -102,22 +104,21 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 
 | 옵션 플래그 | 타입 | 기본값 | 설명 |
 | :--- | :---: | :---: | :--- |
-| **`-h`, `--help`, `-help`** | `flag` | - | **CLI 전체 사용 가이드 및 AI 에이전트 가이드 출력** (`-h`, `--help`, `-help` 모두 동일 지원). |
-| **`--agent-guide`** | `flag` | - | **AI 에이전트/자동화 파이프라인용 기계 판독 가능한 JSON 가이드 출력** (모드, 플래그, 결과물 경로 스키마). |
-| **`-m`, `--mode`** | `str` | `auto` | **자산 처리 모드**:<br>• `character`: 4방향 다중 모션 시트 (시트 + 낱장 프레임 + GIF 생성)<br>• `item` / `single`: 1개 모션 1프레임 단일 아이템/장비/아이콘 (시트/GIF/프레임폴더 생략, 1x/4x PNG 직출력)<br>• `auto`: 자동 감지 |
-| **`--item`** | `flag` | `False` | **아이템 모드 간편 플래그** (`--mode item --no-export-gifs --no-export-frames` 즉시 적용). |
+| **`-h`, `--help`, `-help`** | `flag` | - | **CLI 전체 사용 가이드 및 AI 에이전트 가이드 출력** (`-h`, `--help`, `-help` 모두 지원). |
+| **`--agent-guide`** | `flag` | - | **AI 에이전트/자동화 파이프라인용 기계 판독 가능한 JSON 가이드 출력** (플래그, 자산 타입별 결과물 경로 스키마). |
+| **`--static`** | `flag` | `False` | **1모션 1프레임 정적 자산 간편 플래그** (`-g canvas --no-gifs --no-frames --no-sheet` 즉시 적용). |
 | **`-o`, `--output-dir`** | `str` | `./output` | 결과물 스프라이트 시트 및 메타데이터가 저장될 출력 디렉토리 경로. |
 | **`-c`, `--cell-size`** | `str` | `None` (auto) | **개별 스프라이트 프레임의 규격 크기**.<br>예: `32x32`, `32`, `48x48`, `64x64`.<br>지정 시 모든 프레임을 해당 캔버스 크기(바닥 중앙 정렬)로 패킹합니다. |
-| **`-g`, `--grid-mode`** | `str` | `auto-fit` | **그리드 패킹 모드**:<br>• `fixed-32`: $32\times 32\text{px}$ 표준 규격 패킹<br>• `auto-fit`: 캐릭터 실루엣에 맞춘 가변 최적 크기<br>• `fixed-48`: $48\times 48\text{px}$ 패킹<br>• `fixed-64`: $64\times 64\text{px}$ 패킹<br>• `canvas`: 모션 분할 없는 1:1 통짜 일러스트/아이템 모드 |
+| **`-g`, `--grid-mode`** | `str` | `auto-fit` | **그리드 패킹 모드**:<br>• `fixed-32`: $32\times 32\text{px}$ 표준 규격 패킹<br>• `auto-fit`: 캐릭터 실루엣에 맞춘 가변 최적 크기<br>• `fixed-48`: $48\times 48\text{px}$ 패킹<br>• `fixed-64`: $64\times 64\text{px}$ 패킹<br>• `canvas`: 모션 분할 없는 1:1 통짜 일러스트/정적 자산 모드 |
 | **`-P`, `--pitch`** | `int` | `8` (auto) | 가상 픽셀 블록의 피치 크기(raw 픽셀 단위). 생략 시 자동 감지. |
 | **`-p`, `--palette`** | `str` | `snapper-16` | **색상 팔레트 프리셋** (아래 팔레트 목록 참조). |
 | **`-k`, `--max-colors`** | `int` | `16` | 캐릭터 전경(Foreground)에 할당할 최대 색상 수 (기본: 16). |
 | **`-s`, `--scale`** | `int` | `4` | **최종 출력 디스플레이 확대 배율** (최근방 이웃 보간):<br>• `1`: 네이티브 논리 픽셀 크기 ($128\times 128$ 등)<br>• `2`: 2배율 확대 ($256\times 256$ 등)<br>• `4`: 4배율 표준 확대 ($512\times 512$ 등)<br>• `8`: 8배율 고해상도 확대 ($1024\times 1024$ 등) |
-| **`--export-sheet`** | `bool` | `auto` | **`{stem}_pixel_sheet.png` 생성 여부** (캐릭터 모드 기본 `True`, 아이템 모드 기본 `False`). |
-| **`--export-1x`** | `bool` | `True` | **게임 엔진용 1배(1x) 원본 규격 자산 및 메타데이터를 `1x/` 하위 폴더에 동시 생성** (`--no-export-1x`로 비활성화 가능). |
-| **`--export-gifs`** | `bool` | `auto` | **방향/동작별 개별 애니메이션 GIF 및 전방향 통합 프리뷰 GIF 동시 생성** (캐릭터 모드 기본 `True`, 아이템 모드 기본 `False`). |
+| **`--no-sheet`** / **`--export-sheet`** | `bool` | `auto` | **`{stem}_pixel_sheet.png` 생성 토글** (비활성화 시 `{stem}.png`로 직접 저장. 1프레임 캔버스 기본 `False`, 다중 프레임 시트 기본 `True`). |
+| **`--no-gifs`** / **`--export-gifs`** | `bool` | `auto` | **애니메이션 GIF 생성 토글** (1프레임 캔버스 기본 `False`, 다중 프레임 시트 기본 `True`). |
+| **`--no-frames`** / **`--export-frames`** | `bool` | `auto` | **동작별 낱장 프레임 분할 폴더(`_frames/`) 생성 토글** (1프레임 캔버스 기본 `False`, 다중 프레임 시트 기본 `True`). |
 | **`--gif-duration`** | `int` | `150` | 애니메이션 GIF 프레임당 노출 시간 (ms 단위, 기본: 150ms). |
-| **`--export-frames`** | `bool` | `auto` | **동작(모션)별 및 프레임별 1배(1x) 원본 규격 낱장 PNG 파일들을 하위 폴더(`_frames/`)에 동시 분할 저장** (캐릭터 모드 기본 `True`, 아이템 모드 기본 `False`). |
+| **`--export-1x`** | `bool` | `True` | **게임 엔진용 1배(1x) 원본 규격 자산 및 메타데이터를 `1x/` 하위 폴더에 동시 생성** (`--no-export-1x`로 비활성화 가능). |
 | **`--clean-orphans`** | `flag` | `False` | $1\text{px}$ 크기의 고립된 단일 노이즈 픽셀 자동 제거. |
 | **`--no-bg-remove`** | `flag` | `False` | 배경 투명화 제거를 건너뛰고 원본 배경색을 그대로 유지. |
 | **`--report-name`** | `str` | `result.md` | 품질 감사 마크다운 리포트 파일명. |
@@ -144,9 +145,9 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 
 ## 📦 생성 결과물 구조 (Output Artifacts)
 
-변환 완료 시 자산 모드에 맞추어 최적화된 구조로 생성됩니다:
+변환 완료 시 자산 구조에 맞추어 최적화되어 생성됩니다:
 
-### 1. 캐릭터 모드 (`--mode character`, 기본값)
+### 1. 다중 모션 스프라이트 시트 (보행 사이클 등)
 다중 모션 스프라이트 시트, 모션별 분할 프레임, 방향별 애니메이션 GIF가 일괄 생성됩니다:
 ```
 output_dir/
@@ -173,16 +174,16 @@ output_dir/
 └── result.md                   # 📊 100% 코어 보존율 및 품질 감사 종합 보고서
 ```
 
-### 2. 아이템 / 프랍 모드 (`--item` 또는 `--mode item`)
-1개 모션 1프레임 규격으로 불필요한 GIF나 하위 프레임 폴더 없이 깔끔한 게임 자산 PNG와 메타데이터만 즉시 생성됩니다:
+### 2. 1모션 1프레임 정적 자산 (아이템, 무기, 아이콘, 프랍)
+불필요한 GIF나 하위 프레임 폴더 없이 깔끔한 단일 자산 PNG와 메타데이터만 즉시 생성됩니다:
 ```
 output_dir/
 ├── 1x/
-│   ├── item_sword.png          # 1배(1x) 원본 규격 단일 아이템 PNG (게임 엔진 직배치용)
-│   └── item_sword_metadata.json
+│   ├── sword.png               # 1배(1x) 원본 규격 단일 PNG (게임 엔진 직배치용)
+│   └── sword_metadata.json
 ├── 4x/
-│   ├── item_sword.png          # 4배(4x) 고해상도 프리뷰 단일 아이템 PNG
-│   └── item_sword_metadata.json
+│   ├── sword.png               # 4배(4x) 고해상도 프리뷰 단일 PNG
+│   └── sword_metadata.json
 └── result.md                   # 📊 품질 감사 종합 보고서
 ```
 

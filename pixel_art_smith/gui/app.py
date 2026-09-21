@@ -97,7 +97,7 @@ class PixelArtSmithApp:
             "fixed-32 (32x32px Retro Snapper Standard)",
             "fixed-48 (48x48px Console / RPG Standard)",
             "fixed-64 (64x64px HD Pixel Art Standard)",
-            "canvas / item (Single 1:1 Asset - No Animation)",
+            "canvas (1:1 Static Asset - No Animation)",
         ]
         self.var_grid_mode = tk.StringVar(value=grid_mode_options[0])
         if GUI_BACKEND == "customtkinter":
@@ -663,14 +663,13 @@ class PixelArtSmithApp:
             messagebox.showwarning("Warning", "No processed sprite sheet to export.")
             return
 
-        is_item_mode = (
-            "item" in self.var_grid_mode.get().lower()
-            or "canvas" in self.var_grid_mode.get().lower()
+        is_static_asset = (
+            "canvas" in self.var_grid_mode.get().lower()
             or (self.std_grid is not None and len(self.std_grid) == 1 and len(self.std_grid[0]) == 1)
         )
 
-        stem_name = self.current_image_path.stem if self.current_image_path else ("item" if is_item_mode else "sprite")
-        default_filename = f"{stem_name}.png" if is_item_mode else f"{stem_name}_pixel_sheet.png"
+        stem_name = self.current_image_path.stem if self.current_image_path else ("asset" if is_static_asset else "sprite")
+        default_filename = f"{stem_name}.png" if is_static_asset else f"{stem_name}_pixel_sheet.png"
 
         out_path_str = filedialog.asksaveasfilename(
             defaultextension=".png",
@@ -687,10 +686,10 @@ class PixelArtSmithApp:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, indent=2)
 
-        asset_label = "Item Asset" if is_item_mode else "Matrix Sheet"
+        asset_label = "Single Asset" if is_static_asset else "Matrix Sheet"
         export_details = [f"- {asset_label}: {out_path.name}", f"- Agentic Metadata: {meta_path.name}"]
 
-        if self.std_grid and not is_item_mode:
+        if self.std_grid and not is_static_asset:
             try:
                 stem = out_path.stem.replace("_pixel_sheet", "")
                 gifs_dir = out_path.parent / f"{stem}_gifs"

@@ -71,7 +71,8 @@ def test_main_cli_help(capsys):
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "PixelArtSmith" in captured.out
-    assert "Item Mode" in captured.out
+    assert "--no-gifs" in captured.out
+    assert "--static" in captured.out
 
 
 def test_main_cli_dash_help(capsys):
@@ -82,7 +83,7 @@ def test_main_cli_dash_help(capsys):
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "PixelArtSmith" in captured.out
-    assert "Item Mode" in captured.out
+    assert "--no-gifs" in captured.out
 
 
 def test_main_cli_short_h(capsys):
@@ -103,12 +104,13 @@ def test_main_cli_agent_guide(capsys):
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data["name"] == "PixelArtSmith"
-    assert "character" in data["modes"]
-    assert "item" in data["modes"]
-    assert "--item" in data["flags"]
+    assert "multi_motion_sheet" in data["asset_types"]
+    assert "single_frame_static" in data["asset_types"]
+    assert "--no-gifs / --export-gifs" in data["flags"]
+    assert "--static" in data["flags"]
 
 
-def test_process_single_image_item_mode(tmp_path):
+def test_process_single_image_static_asset(tmp_path):
     import numpy as np
 
     # Synthetic single item image: 128x128 with pitch 8 -> 16x16 grid
@@ -132,7 +134,7 @@ def test_process_single_image_item_mode(tmp_path):
         scale=4,
         palette_name="snapper-16",
         max_colors=16,
-        mode="item",
+        grid_mode="canvas",
         export_sheet=False,
         export_frames=False,
         export_gifs=False,
@@ -140,7 +142,6 @@ def test_process_single_image_item_mode(tmp_path):
     )
 
     assert result["success"] is True
-    assert result["mode"] == "item"
     assert result["rows"] == 1
     assert result["total_frames"] == 1
     assert "PASS" in result["audit_metric"].verdict
@@ -160,7 +161,7 @@ def test_process_single_image_item_mode(tmp_path):
     assert not (out_dir / "4x" / "sword_gifs").exists()
 
 
-def test_main_cli_item_mode_e2e(tmp_path):
+def test_main_cli_static_e2e(tmp_path):
     import numpy as np
 
     img_arr = np.full((128, 128, 3), 255, dtype=np.uint8)
@@ -172,10 +173,10 @@ def test_main_cli_item_mode_e2e(tmp_path):
     item_img.save(item_path)
 
     out_dir = tmp_path / "out_shield"
-    ret = main_cli([str(item_path), "-o", str(out_dir), "--item", "-s", "4"])
+    ret = main_cli([str(item_path), "-o", str(out_dir), "--static", "-s", "4"])
     assert ret == 0
 
-    # Verify files created by CLI in item mode
+    # Verify files created by CLI in static mode
     assert (out_dir / "1x" / "shield.png").is_file()
     assert (out_dir / "4x" / "shield.png").is_file()
     assert (out_dir / "1x" / "shield_metadata.json").is_file()
@@ -184,4 +185,29 @@ def test_main_cli_item_mode_e2e(tmp_path):
     assert not (out_dir / "1x" / "shield_gifs").exists()
     assert not (out_dir / "1x" / "shield_frames").exists()
     assert (out_dir / "result.md").is_file()
+
+
+def test_main_cli_granular_flags_e2e(tmp_path):
+    import numpy as np
+
+    img_arr = np.full((128, 128, 3), 255, dtype=np.uint8)
+    img_arr[40:90, 60:68] = [60, 120, 220]
+    img_arr[90:98, 48:80] = [220, 180, 50]
+
+    item_img = Image.fromarray(img_arr, "RGB")
+    item_path = tmp_path / "potion.png"
+    item_img.save(item_path)
+
+    out_dir = tmp_path / "out_potion"
+    ret = main_cli([str(item_path), "-o", str(out_dir), "--no-gifs", "--no-frames", "--no-sheet", "-s", "4"])
+    assert ret == 0
+
+    # Verify deliverable flags suppress gifs, frames, and sheet suffix
+    assert (out_dir / "1x" / "potion.png").is_file()
+    assert (out_dir / "4x" / "potion.png").is_file()
+    assert not (out_dir / "1x" / "potion_pixel_sheet.png").exists()
+    assert not (out_dir / "1x" / "potion_gifs").exists()
+    assert not (out_dir / "1x" / "potion_frames").exists()
+    assert (out_dir / "result.md").is_file()
+
 

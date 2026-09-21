@@ -90,7 +90,7 @@ class QualityAuditor:
             notes = f"100% {rows}x{cols} Grid Intact | 0% Detail Erosion"
         elif is_canvas_asset and is_pixels_retained:
             verdict = "✅ PASS"
-            notes = "100% Snapper-Parity Canvas / Single Item | 0% Detail Erosion"
+            notes = "100% Snapper-Parity Canvas / Single Static Asset | 0% Detail Erosion"
         elif is_pixels_retained:
             verdict = "✅ PASS"
             notes = f"Custom Matrix ({rows}x{cols}) | 0% Detail Erosion"
@@ -205,7 +205,7 @@ class QualityAuditor:
 
         for m in metrics:
             if m.total_frames == 1:
-                lines.append(f"│   ├── {m.name}.png (Standalone Item Asset)")
+                lines.append(f"│   ├── {m.name}.png (Standalone Asset)")
                 if (output_dir / "1x" / f"{m.name}_pixel_sheet.png").exists():
                     lines.append(f"│   ├── {m.name}_pixel_sheet.png")
                 lines.append(f"│   └── {m.name}_metadata.json")
@@ -224,7 +224,7 @@ class QualityAuditor:
         )
         for m in metrics:
             if m.total_frames == 1:
-                lines.append(f"│   ├── {m.name}.png (Standalone Item Asset)")
+                lines.append(f"│   ├── {m.name}.png (Standalone Asset)")
                 if (output_dir / "4x" / f"{m.name}_pixel_sheet.png").exists():
                     lines.append(f"│   ├── {m.name}_pixel_sheet.png")
                 lines.append(f"│   └── {m.name}_metadata.json")
