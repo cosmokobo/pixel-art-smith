@@ -18,6 +18,119 @@ from ..core.palette import PALETTES, hex_to_rgb
 from ..core.posterizer import PixelPosterizer
 from ..core.sprite_isolator import SpriteIsolator
 
+EPILOG_HELP = """
+Modes & AI Agent Usage Guide:
+--------------------------------------------------------------------------------
+1. Character Mode (Default: --mode character):
+   - For multi-motion, multi-frame character sheets (e.g. 4 directions: down, left, right, up).
+   - Generates 1x & scaled sprite sheets, motion-separated frames, and animated GIFs:
+       1x/{stem}_pixel_sheet.png
+       1x/{stem}_metadata.json
+       1x/{stem}_frames/motion_XX_{dir}/frame_YY.png
+       1x/{stem}_gifs/{stem}_{dir}.gif
+       1x/{stem}_gifs/{stem}_composite_preview.gif
+
+2. Item Mode (--item or --mode item):
+   - For 1-motion, 1-frame pixel art items, icons, weapons, equipment, or props.
+   - Automatically disables GIF export and frame folder splitting.
+   - Outputs clean, direct game-engine asset PNGs:
+       1x/{stem}.png
+       1x/{stem}_metadata.json
+       {scale}x/{stem}.png
+       {scale}x/{stem}_metadata.json
+   - (Optional) Use --export-sheet to also generate {stem}_pixel_sheet.png if desired.
+
+Granular Asset Toggles:
+   --export-sheet / --no-export-sheet   : Toggle sprite sheet generation
+   --export-gifs / --no-export-gifs     : Toggle animated GIF generation
+   --export-frames / --no-export-frames : Toggle motion frame extraction
+   --export-1x / --no-export-1x         : Toggle 1x native resolution deliverables
+
+Machine-Readable Guide:
+   Run with '--agent-guide' to output full JSON schema for AI agents / automated pipelines.
+"""
+
+AGENT_GUIDE = {
+    "name": "PixelArtSmith",
+    "description": "True-Grid AI Sprite Sheet & Pixel Art Processing Engine",
+    "modes": {
+        "character": {
+            "description": "Multi-motion directional character sprite sheets (e.g., 4-direction walking animations).",
+            "default_deliverables": {
+                "sheets": True,
+                "frames": True,
+                "gifs": True,
+                "metadata": True,
+            },
+            "deliverable_paths": {
+                "1x": [
+                    "1x/{stem}_pixel_sheet.png",
+                    "1x/{stem}_metadata.json",
+                    "1x/{stem}_frames/motion_{dir}/frame_{idx}.png",
+                    "1x/{stem}_gifs/{stem}_{dir}.gif",
+                    "1x/{stem}_gifs/{stem}_composite_preview.gif",
+                ],
+                "scaled": [
+                    "{scale}x/{stem}_pixel_sheet.png",
+                    "{scale}x/{stem}_metadata.json",
+                    "{scale}x/{stem}_frames/motion_{dir}/frame_{idx}.png",
+                    "{scale}x/{stem}_gifs/{stem}_{dir}.gif",
+                    "{scale}x/{stem}_gifs/{stem}_composite_preview.gif",
+                ],
+            },
+        },
+        "item": {
+            "description": "Single-motion, 1-frame items, weapons, icons, props, or UI elements.",
+            "default_deliverables": {
+                "item_png": True,
+                "sheet": False,
+                "frames": False,
+                "gifs": False,
+                "metadata": True,
+            },
+            "deliverable_paths": {
+                "1x": [
+                    "1x/{stem}.png",
+                    "1x/{stem}_metadata.json",
+                ],
+                "scaled": [
+                    "{scale}x/{stem}.png",
+                    "{scale}x/{stem}_metadata.json",
+                ],
+            },
+            "recommended_flags": ["--item", "--mode item"],
+        },
+    },
+    "flags": {
+        "--mode": "Processing mode: 'character' (multi-frame sheets + GIFs) or 'item' (single asset, no GIFs/subframes). Default: auto.",
+        "--item": "Convenience shortcut for item mode ('--mode item --no-export-gifs --no-export-frames').",
+        "--export-sheet / --no-export-sheet": "Toggle exporting {stem}_pixel_sheet.png (default: True for character, False for item).",
+        "--export-gifs / --no-export-gifs": "Toggle exporting animated GIFs (default: True for character, False for item).",
+        "--export-frames / --no-export-frames": "Toggle exporting individual frame PNGs (default: True for character, False for item).",
+        "--export-1x / --no-export-1x": "Toggle exporting 1x native resolution deliverables (default: True).",
+        "--scale": "Integer upscale factor (e.g. 4 for 4x display, default: 4).",
+        "--pitch": "Pixel block pitch in source image (0 for auto, 8 for 32px sprites, 4 for 64px RPG).",
+        "--grid-mode": "Layout mode: 'auto-fit', 'fixed-32', 'preserve-sheet', 'canvas', etc.",
+        "--palette": "Palette preset: 'snapper-16', 'pico-8', 'gameboy', etc.",
+        "--report-name": "Markdown audit report name (default: result.md).",
+    },
+    "examples": [
+        {
+            "type": "Character Sprite Sheet (Multi-motion, Animated)",
+            "command": "python -m pixel_art_smith.cli.runner input_character.png -o ./output -s 4",
+        },
+        {
+            "type": "Item / Prop / Single Asset (1-motion, 1-frame, No GIFs)",
+            "command": "python -m pixel_art_smith.cli.runner input_item.png -o ./output --item -s 4",
+        },
+    ],
+}
+
+
+def print_agent_guide() -> None:
+    """Print machine-readable JSON guide for AI agents."""
+    print(json.dumps(AGENT_GUIDE, indent=2))
+
 
 def parse_cell_size(size_str: str | None) -> tuple[int, int] | None:
     """Parse 'WxH' or 'N' into (width, height), or None for auto."""
@@ -93,8 +206,10 @@ def process_single_image(
     export_1x: bool = True,
     expected_rows: int | None = None,
     expected_cols: int | None = None,
+    mode: str = "auto",
+    export_sheet: bool = True,
 ) -> dict:
-    """Execute Snapper-Parity True-Grid post-processing pipeline on a sprite sheet."""
+    """Execute Snapper-Parity True-Grid post-processing pipeline on a sprite sheet or item."""
     print(f"\n[INFO] Processing: {input_path.name}")
     raw_img = Image.open(input_path).convert("RGB")
 
@@ -160,7 +275,11 @@ def process_single_image(
 
     # 4. Binary Routing: Adaptive Motion Sprite Sheet (Track A) vs Snapper-Parity Clean Canvas (Track B)
     detected_mode, auto_rows, auto_cols = SpriteIsolator.detect_matrix_layout(clean_img)
-    force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas")
+    is_item_mode = mode in ("item", "single")
+    force_canvas = is_item_mode or grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas", "item")
+
+    if is_item_mode:
+        detected_mode = "canvas"
 
     packed_sheet_1x = None
     metadata_1x = None
@@ -233,12 +352,22 @@ def process_single_image(
     metadata_1x_to_save = metadata_1x if (metadata_1x is not None) else metadata
     grid_1x_native = std_grid_1x if (std_grid_1x is not None) else (std_grid if scale == 1 else None)
 
-    sheet_1x_path = dir_1x / f"{stem}_pixel_sheet.png"
-    sheet_1x_to_save.save(sheet_1x_path)
+    # For item or canvas assets, save standard item PNG: 1x/{stem}.png
+    item_1x_path: Path | None = None
+    if is_item_mode or detected_mode == "canvas":
+        item_1x_path = dir_1x / f"{stem}.png"
+        sheet_1x_to_save.save(item_1x_path)
+        print(f"  [SUCCESS] Output 1x Native Item Asset: {item_1x_path}")
+
+    sheet_1x_path: Path | None = None
+    if export_sheet:
+        sheet_1x_path = dir_1x / f"{stem}_pixel_sheet.png"
+        sheet_1x_to_save.save(sheet_1x_path)
+        print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
+
     json_1x_path = dir_1x / f"{stem}_metadata.json"
     with open(json_1x_path, "w", encoding="utf-8") as f:
         json.dump(metadata_1x_to_save, f, indent=2)
-    print(f"  [SUCCESS] Output 1x Native Sprite Sheet: {sheet_1x_path}")
 
     # 1x Frames
     if export_frames:
@@ -273,22 +402,28 @@ def process_single_image(
             stem=stem,
             duration=gif_duration,
         )
-        print(
-            f"  [INFO] Exported 1x native motion GIFs to: {gifs_1x_dir}/"
-        )
+        print(f"  [INFO] Exported 1x native motion GIFs to: {gifs_1x_dir}/")
 
     # 2. Scaled Resolution Deliverables (e.g. 4x High-Res Display & Preview)
-    dir_scaled = None
-    sheet_scaled_path = None
+    dir_scaled: Path | None = None
+    sheet_scaled_path: Path | None = None
+    item_scaled_path: Path | None = None
     if scale > 1:
         dir_scaled = output_dir / f"{scale}x"
         dir_scaled.mkdir(parents=True, exist_ok=True)
-        sheet_scaled_path = dir_scaled / f"{stem}_pixel_sheet.png"
-        packed_sheet.save(sheet_scaled_path)
+        if is_item_mode or detected_mode == "canvas":
+            item_scaled_path = dir_scaled / f"{stem}.png"
+            packed_sheet.save(item_scaled_path)
+            print(f"  [SUCCESS] Output {scale}x Scaled Item Asset: {item_scaled_path}")
+
+        if export_sheet:
+            sheet_scaled_path = dir_scaled / f"{stem}_pixel_sheet.png"
+            packed_sheet.save(sheet_scaled_path)
+            print(f"  [SUCCESS] Output {scale}x Scaled Sprite Sheet: {sheet_scaled_path}")
+
         json_scaled_path = dir_scaled / f"{stem}_metadata.json"
         with open(json_scaled_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
-        print(f"  [SUCCESS] Output {scale}x Scaled Sprite Sheet: {sheet_scaled_path}")
 
         # Scaled Frames
         if export_frames and std_grid:
@@ -310,7 +445,9 @@ def process_single_image(
     # Run deterministic quality audit
     primary_sheet_img = packed_sheet if scale > 1 else sheet_1x_to_save
     primary_metadata = metadata if scale > 1 else metadata_1x_to_save
+    primary_item_path = item_scaled_path if (scale > 1 and item_scaled_path) else item_1x_path
     primary_sheet_path = sheet_scaled_path if (scale > 1 and sheet_scaled_path) else sheet_1x_path
+    primary_path = primary_item_path if primary_item_path else primary_sheet_path
 
     audit_metric = QualityAuditor.audit_single(
         src_img=raw_img,
@@ -323,11 +460,13 @@ def process_single_image(
         "success": True,
         "status": "success",
         "input": str(input_path),
-        "sheet": str(primary_sheet_path),
+        "sheet": str(primary_path) if primary_path else str(sheet_1x_path),
+        "item_path": str(primary_item_path) if primary_item_path else None,
         "rows": n_rows,
         "total_frames": total_frames,
         "cell_size": f"{final_cell_size[0] * scale}x{final_cell_size[1] * scale}",
         "grid_mode": grid_mode,
+        "mode": "item" if is_item_mode else "character",
         "audit_metric": audit_metric,
     }
 
@@ -335,11 +474,40 @@ def process_single_image(
 def main_cli(args: list[str] | None = None) -> int:
     """Main CLI entrypoint."""
     parser = argparse.ArgumentParser(
-        description="PixelArtSmith: Convert AI/SD Character Sheets into Authentic Grid-Perfect Pixel Art."
+        description="PixelArtSmith: Convert AI/SD Character Sheets into Authentic Grid-Perfect Pixel Art.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=EPILOG_HELP,
+        add_help=False,
     )
-    parser.add_argument("input", type=str, help="Input image file or directory path.")
+    parser.add_argument(
+        "-h",
+        "--help",
+        "-help",
+        action="help",
+        default=argparse.SUPPRESS,
+        help="Show this help message and exit (supports -h, --help, -help).",
+    )
+    parser.add_argument(
+        "--agent-guide",
+        action="store_true",
+        help="Output machine-readable JSON guide describing modes, arguments, and deliverable structures for AI agents.",
+    )
+    parser.add_argument("input", type=str, nargs="?", default=None, help="Input image file or directory path.")
     parser.add_argument(
         "-o", "--output-dir", type=str, default="./output", help="Output directory path (default: ./output)."
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        type=str,
+        default="auto",
+        choices=["auto", "character", "sheet", "item", "single"],
+        help="Asset processing mode: 'character' (multi-frame sheets + GIFs) or 'item' (single 1-frame asset, no GIFs/subframes). Default: auto.",
+    )
+    parser.add_argument(
+        "--item",
+        action="store_true",
+        help="Shortcut for item mode (single 1-frame asset: disables GIFs, frame subfolders, and sprite sheet naming).",
     )
     parser.add_argument(
         "-P",
@@ -368,16 +536,22 @@ def main_cli(args: list[str] | None = None) -> int:
     parser.add_argument("--no-bg-remove", action="store_true", help="Keep solid background without transparency.")
     parser.add_argument("--clean-orphans", action="store_true", help="Clean isolated single-pixel noise dots.")
     parser.add_argument(
+        "--export-sheet",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Export sprite sheet image ({stem}_pixel_sheet.png). (default: True for character mode, False for item mode).",
+    )
+    parser.add_argument(
         "--export-frames",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Export individual 1x native standardized frame PNGs by motion (default: True).",
+        default=None,
+        help="Export individual 1x native standardized frame PNGs by motion (default: True for character mode, False for item mode).",
     )
     parser.add_argument(
         "--export-gifs",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Export per-motion animated GIFs and composite preview GIF (default: True).",
+        default=None,
+        help="Export per-motion animated GIFs and composite preview GIF (default: True for character mode, False for item mode).",
     )
     parser.add_argument(
         "--gif-duration",
@@ -400,6 +574,14 @@ def main_cli(args: list[str] | None = None) -> int:
 
     parsed = parser.parse_args(args)
 
+    if parsed.agent_guide:
+        print_agent_guide()
+        return 0
+
+    if not parsed.input:
+        parser.print_help()
+        return 1
+
     input_path = Path(parsed.input)
     if not input_path.exists():
         print(f"[ERROR] Input path does not exist: {input_path}", file=sys.stderr)
@@ -407,6 +589,19 @@ def main_cli(args: list[str] | None = None) -> int:
 
     output_dir = Path(parsed.output_dir)
     explicit_cell = parse_cell_size(parsed.cell_size)
+
+    # Resolve mode and asset export defaults
+    effective_mode = "item" if parsed.item else parsed.mode
+    is_item = effective_mode in ("item", "single")
+
+    if is_item:
+        export_sheet = parsed.export_sheet if parsed.export_sheet is not None else False
+        export_frames = parsed.export_frames if parsed.export_frames is not None else False
+        export_gifs = parsed.export_gifs if parsed.export_gifs is not None else False
+    else:
+        export_sheet = parsed.export_sheet if parsed.export_sheet is not None else True
+        export_frames = parsed.export_frames if parsed.export_frames is not None else True
+        export_gifs = parsed.export_gifs if parsed.export_gifs is not None else True
 
     # Collect images
     if input_path.is_file():
@@ -432,7 +627,10 @@ def main_cli(args: list[str] | None = None) -> int:
     print("========================================================================")
     print(" 🎨 PixelArtSmith: True-Grid AI Sprite Sheet -> Pixel Art Engine")
     print(
-        f" Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x | Export 1x: {parsed.export_1x} | Export Frames (1x): {parsed.export_frames} | Export GIFs: {parsed.export_gifs}"
+        f" Mode: {effective_mode} | Pitch: {parsed.pitch}px | Grid Mode: {parsed.grid_mode} | Palette: {parsed.palette} | Max Colors: {parsed.max_colors} | Scale: {parsed.scale}x"
+    )
+    print(
+        f" Deliverables: Sheet={export_sheet} | Frames={export_frames} | GIFs={export_gifs} | Export 1x={parsed.export_1x}"
     )
     print(f" Found {len(image_files)} image(s) to process.")
     print("========================================================================")
@@ -453,10 +651,12 @@ def main_cli(args: list[str] | None = None) -> int:
                 max_colors=parsed.max_colors,
                 remove_bg=not parsed.no_bg_remove,
                 clean_orphans=parsed.clean_orphans,
-                export_frames=parsed.export_frames,
-                export_gifs=parsed.export_gifs,
+                export_frames=export_frames,
+                export_gifs=export_gifs,
                 gif_duration=parsed.gif_duration,
                 export_1x=parsed.export_1x,
+                mode=effective_mode,
+                export_sheet=export_sheet,
             )
             if res.get("status") == "success":
                 success_count += 1

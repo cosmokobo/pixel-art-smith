@@ -40,6 +40,7 @@ venv.bak/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+uv.lock
 
 # Rembg cache / model weights
 .u2net/

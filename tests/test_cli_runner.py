@@ -71,3 +71,117 @@ def test_main_cli_help(capsys):
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "PixelArtSmith" in captured.out
+    assert "Item Mode" in captured.out
+
+
+def test_main_cli_dash_help(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_cli(["-help"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "PixelArtSmith" in captured.out
+    assert "Item Mode" in captured.out
+
+
+def test_main_cli_short_h(capsys):
+    import pytest
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_cli(["-h"])
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "PixelArtSmith" in captured.out
+
+
+def test_main_cli_agent_guide(capsys):
+    import json
+
+    ret = main_cli(["--agent-guide"])
+    assert ret == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["name"] == "PixelArtSmith"
+    assert "character" in data["modes"]
+    assert "item" in data["modes"]
+    assert "--item" in data["flags"]
+
+
+def test_process_single_image_item_mode(tmp_path):
+    import numpy as np
+
+    # Synthetic single item image: 128x128 with pitch 8 -> 16x16 grid
+    # Foreground sword in center, white background (255, 255, 255)
+    img_arr = np.full((128, 128, 3), 255, dtype=np.uint8)
+    # Draw sword blade: rows 40..90, cols 60..68
+    img_arr[40:90, 60:68] = [60, 120, 220]
+    # Draw sword guard: rows 90..98, cols 48..80
+    img_arr[90:98, 48:80] = [220, 180, 50]
+    # Draw sword hilt: rows 98..112, cols 60..68
+    img_arr[98:112, 60:68] = [120, 70, 30]
+
+    item_img = Image.fromarray(img_arr, "RGB")
+    item_path = tmp_path / "sword.png"
+    item_img.save(item_path)
+
+    out_dir = tmp_path / "out_item"
+    result = process_single_image(
+        input_path=item_path,
+        output_dir=out_dir,
+        scale=4,
+        palette_name="snapper-16",
+        max_colors=16,
+        mode="item",
+        export_sheet=False,
+        export_frames=False,
+        export_gifs=False,
+        export_1x=True,
+    )
+
+    assert result["success"] is True
+    assert result["mode"] == "item"
+    assert result["rows"] == 1
+    assert result["total_frames"] == 1
+    assert "PASS" in result["audit_metric"].verdict
+
+    # Check 1x deliverables: clean single PNG, no sheets/frames/gifs
+    assert (out_dir / "1x" / "sword.png").is_file()
+    assert (out_dir / "1x" / "sword_metadata.json").is_file()
+    assert not (out_dir / "1x" / "sword_pixel_sheet.png").exists()
+    assert not (out_dir / "1x" / "sword_frames").exists()
+    assert not (out_dir / "1x" / "sword_gifs").exists()
+
+    # Check 4x deliverables: clean single PNG, no sheets/frames/gifs
+    assert (out_dir / "4x" / "sword.png").is_file()
+    assert (out_dir / "4x" / "sword_metadata.json").is_file()
+    assert not (out_dir / "4x" / "sword_pixel_sheet.png").exists()
+    assert not (out_dir / "4x" / "sword_frames").exists()
+    assert not (out_dir / "4x" / "sword_gifs").exists()
+
+
+def test_main_cli_item_mode_e2e(tmp_path):
+    import numpy as np
+
+    img_arr = np.full((128, 128, 3), 255, dtype=np.uint8)
+    img_arr[40:90, 60:68] = [60, 120, 220]
+    img_arr[90:98, 48:80] = [220, 180, 50]
+
+    item_img = Image.fromarray(img_arr, "RGB")
+    item_path = tmp_path / "shield.png"
+    item_img.save(item_path)
+
+    out_dir = tmp_path / "out_shield"
+    ret = main_cli([str(item_path), "-o", str(out_dir), "--item", "-s", "4"])
+    assert ret == 0
+
+    # Verify files created by CLI in item mode
+    assert (out_dir / "1x" / "shield.png").is_file()
+    assert (out_dir / "4x" / "shield.png").is_file()
+    assert (out_dir / "1x" / "shield_metadata.json").is_file()
+    assert (out_dir / "4x" / "shield_metadata.json").is_file()
+    assert not (out_dir / "1x" / "shield_pixel_sheet.png").exists()
+    assert not (out_dir / "1x" / "shield_gifs").exists()
+    assert not (out_dir / "1x" / "shield_frames").exists()
+    assert (out_dir / "result.md").is_file()
+

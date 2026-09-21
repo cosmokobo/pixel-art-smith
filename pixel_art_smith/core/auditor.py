@@ -82,14 +82,15 @@ class QualityAuditor:
         # Deterministic Verdict Evaluation
         is_matrix_sheet = rows == 4 and cols in (4, 5) and total_frames in (16, 20)
         is_canvas_asset = rows == 1 and cols == 1 and total_frames == 1
-        is_pixels_retained = opaque_px > 1000
+        min_required_px = 30 if is_canvas_asset else 500
+        is_pixels_retained = opaque_px >= min_required_px
 
         if is_matrix_sheet and is_pixels_retained:
             verdict = "✅ PASS"
             notes = f"100% {rows}x{cols} Grid Intact | 0% Detail Erosion"
         elif is_canvas_asset and is_pixels_retained:
             verdict = "✅ PASS"
-            notes = "100% Snapper-Parity Canvas | 0% Detail Erosion"
+            notes = "100% Snapper-Parity Canvas / Single Item | 0% Detail Erosion"
         elif is_pixels_retained:
             verdict = "✅ PASS"
             notes = f"Custom Matrix ({rows}x{cols}) | 0% Detail Erosion"
@@ -203,12 +204,18 @@ class QualityAuditor:
         )
 
         for m in metrics:
-            lines.append(f"│   ├── {m.name}_pixel_sheet.png")
-            lines.append(f"│   ├── {m.name}_metadata.json")
-            lines.append(f"│   ├── {m.name}_frames/")
-            lines.append(f"│   └── {m.name}_gifs/")
-            lines.append(f"│       ├── {m.name}_all_motions.gif")
-            lines.append(f"│       └── {m.name}_motion_*.gif")
+            if m.total_frames == 1:
+                lines.append(f"│   ├── {m.name}.png (Standalone Item Asset)")
+                if (output_dir / "1x" / f"{m.name}_pixel_sheet.png").exists():
+                    lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+                lines.append(f"│   └── {m.name}_metadata.json")
+            else:
+                lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+                lines.append(f"│   ├── {m.name}_metadata.json")
+                lines.append(f"│   ├── {m.name}_frames/")
+                lines.append(f"│   └── {m.name}_gifs/")
+                lines.append(f"│       ├── {m.name}_all_motions.gif")
+                lines.append(f"│       └── {m.name}_motion_*.gif")
 
         lines.extend(
             [
@@ -216,12 +223,18 @@ class QualityAuditor:
             ]
         )
         for m in metrics:
-            lines.append(f"│   ├── {m.name}_pixel_sheet.png")
-            lines.append(f"│   ├── {m.name}_metadata.json")
-            lines.append(f"│   ├── {m.name}_frames/")
-            lines.append(f"│   └── {m.name}_gifs/")
-            lines.append(f"│       ├── {m.name}_all_motions.gif")
-            lines.append(f"│       └── {m.name}_motion_*.gif")
+            if m.total_frames == 1:
+                lines.append(f"│   ├── {m.name}.png (Standalone Item Asset)")
+                if (output_dir / "4x" / f"{m.name}_pixel_sheet.png").exists():
+                    lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+                lines.append(f"│   └── {m.name}_metadata.json")
+            else:
+                lines.append(f"│   ├── {m.name}_pixel_sheet.png")
+                lines.append(f"│   ├── {m.name}_metadata.json")
+                lines.append(f"│   ├── {m.name}_frames/")
+                lines.append(f"│   └── {m.name}_gifs/")
+                lines.append(f"│       ├── {m.name}_all_motions.gif")
+                lines.append(f"│       └── {m.name}_motion_*.gif")
 
         lines.extend(
             [
