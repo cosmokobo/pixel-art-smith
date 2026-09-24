@@ -11,15 +11,17 @@ class BackgroundRemover:
     @staticmethod
     def segment_background_with_cavity_resolution(
         grid_arr: np.ndarray,
-        bg_diff_thresh: int = 6,
-        max_cavity_area: int = 40,
+        bg_diff_thresh: int = 10,
+        max_cavity_area: int | None = None,
         resolve_cavities: bool = False,
+        min_perimeter_contrast: float = 0.80,
     ) -> tuple[np.ndarray, np.ndarray, int]:
         """Segment background using non-leaking 4-connected floodfill from perimeter edges.
 
         1. Samples canvas background color dynamically from perimeter medians.
         2. Applies 4-connected floodfill from border edges (outer perimeter background).
         3. Preserves internal character elements (white clothing, aprons, frills, eyes, skin).
+        4. Optionally resolves enclosed background cavities (ring holes, necklace loops, hair loops).
 
         Returns:
             (bg_mask, fg_mask, resolved_cavity_pixel_count)
@@ -80,7 +82,9 @@ class BackgroundRemover:
                 perim_diffs = np.max(np.abs(perimeter_rgbs.astype(int) - bg_color.astype(int)), axis=-1)
                 non_bg_fraction = np.mean(perim_diffs > 10)
 
-                if non_bg_fraction > 0.85 and area <= max_cavity_area:
+                if non_bg_fraction >= min_perimeter_contrast and (
+                    max_cavity_area is None or area <= max_cavity_area
+                ):
                     enclosed_bg_mask |= comp_mask
 
         final_bg_mask = outer_bg_mask | enclosed_bg_mask
@@ -90,12 +94,20 @@ class BackgroundRemover:
         return final_bg_mask, final_fg_mask, resolved_count
 
     @staticmethod
-    def remove_background_quantized(quant_img: Image.Image) -> Image.Image:
-        """Apply strict 4-connected floodfill on the quantized 128x128 grid."""
+    def remove_background_quantized(
+        quant_img: Image.Image,
+        resolve_cavities: bool = False,
+        max_cavity_area: int | None = None,
+    ) -> Image.Image:
+        """Apply strict 4-connected floodfill on the quantized grid."""
         arr = np.array(quant_img.convert("RGB"))
         h, w = arr.shape[:2]
 
-        bg_mask, _fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(arr)
+        bg_mask, _fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(
+            arr,
+            resolve_cavities=resolve_cavities,
+            max_cavity_area=max_cavity_area,
+        )
 
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
         rgba[:, :, :3] = arr

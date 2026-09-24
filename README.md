@@ -119,6 +119,8 @@ PixelArtSmith CLI는 단일 이미지 파일 및 디렉토리 일괄 처리를 �
 | **`--no-frames`** / **`--export-frames`** | `bool` | `auto` | **동작별 낱장 프레임 분할 폴더(`_frames/`) 생성 토글** (1프레임 캔버스 기본 `False`, 다중 프레임 시트 기본 `True`). |
 | **`--gif-duration`** | `int` | `150` | 애니메이션 GIF 프레임당 노출 시간 (ms 단위, 기본: 150ms). |
 | **`--export-1x`** | `bool` | `True` | **게임 엔진용 1배(1x) 원본 규격 자산 및 메타데이터를 `1x/` 하위 폴더에 동시 생성** (`--no-export-1x`로 비활성화 가능). |
+| **`--resolve-cavities`** / **`--no-cavities`** | `bool` | `auto` | **폐쇄형 배경 구멍/캐비티 해제 토글** (링, 팔찌, 목걸이 등 내부 빈 공간 투명화. 단일 아이템/캔버스 기본 `True`, 다중 모션 캐릭터 시트 기본 `False`). |
+| **`--max-cavity-area`** | `int` | `None` | 투명화 처리할 내부 캐비티의 최대 픽셀 면적 (단일 아이템 기본: 무제한, 캐릭터 시트 기본: 40px). |
 | **`--clean-orphans`** | `flag` | `False` | $1\text{px}$ 크기의 고립된 단일 노이즈 픽셀 자동 제거. |
 | **`--no-bg-remove`** | `flag` | `False` | 배경 투명화 제거를 건너뛰고 원본 배경색을 그대로 유지. |
 | **`--report-name`** | `str` | `result.md` | 품질 감사 마크다운 리포트 파일명. |

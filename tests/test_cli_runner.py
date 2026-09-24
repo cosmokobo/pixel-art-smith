@@ -1,4 +1,4 @@
-"""Tests for CLI Runner: cell size parsing, frame export, and end-to-end processing pipeline."""
+from pathlib import Path
 
 from PIL import Image
 
@@ -209,5 +209,72 @@ def test_main_cli_granular_flags_e2e(tmp_path):
     assert not (out_dir / "1x" / "potion_gifs").exists()
     assert not (out_dir / "1x" / "potion_frames").exists()
     assert (out_dir / "result.md").is_file()
+
+
+def test_main_cli_cavity_flags_e2e(tmp_path):
+    import numpy as np
+
+    # 32x32 hollow ring image
+    img_arr = np.full((32, 32, 3), 255, dtype=np.uint8)
+    for y in range(32):
+        for x in range(32):
+            dist_sq = (y - 16) ** 2 + (x - 16) ** 2
+            if 36 <= dist_sq <= 144:
+                img_arr[y, x] = [210, 170, 40]
+
+    ring_img = Image.fromarray(img_arr, "RGB")
+    ring_path = tmp_path / "ring.png"
+    ring_img.save(ring_path)
+
+    # 1. Default static mode -> auto-resolves cavities
+    out_dir_default = tmp_path / "out_default"
+    ret = main_cli([str(ring_path), "-o", str(out_dir_default), "--static", "-P", "1", "-s", "4"])
+    assert ret == 0
+    res_img = Image.open(out_dir_default / "1x" / "ring.png")
+    res_arr = np.array(res_img)
+    # Center hole must be transparent
+    assert res_arr[16, 16, 3] == 0
+
+    # 2. Explicit --no-cavities -> cavity remains opaque
+    out_dir_no = tmp_path / "out_no_cavities"
+    ret = main_cli([str(ring_path), "-o", str(out_dir_no), "--static", "--no-cavities", "-P", "1", "-s", "4"])
+    assert ret == 0
+    res_no_img = Image.open(out_dir_no / "1x" / "ring.png")
+    res_no_arr = np.array(res_no_img)
+    # Center hole must be opaque
+    assert res_no_arr[16, 16, 3] == 255
+
+
+def test_real_test_assets_cavity_transparency(tmp_path):
+    import cv2
+    import numpy as np
+
+    test_assets_dir = Path("/Users/kojeomstudio/pixel-art-smith-test")
+    if not test_assets_dir.exists():
+        return
+
+    out_dir = tmp_path / "out_real_test_assets"
+    ret = main_cli([str(test_assets_dir), "-o", str(out_dir), "--static", "-P", "0", "-s", "4"])
+    assert ret == 0
+
+    expected_assets = [
+        "accessory_16_jade_bangle.png",
+        "accessory_17_charm_bracelet.png",
+        "accessory_18_crystal_pendant.png",
+        "accessory_20_diamond_ring.png",
+        "weapon_08_crossbow.png",
+    ]
+
+    for asset_name in expected_assets:
+        out_file = out_dir / "1x" / asset_name
+        assert out_file.is_file(), f"Missing output for {asset_name}"
+        img = Image.open(out_file)
+        arr = np.array(img)
+        alpha = arr[:, :, 3]
+        num_labels, _, _, _ = cv2.connectedComponentsWithStats((alpha > 0).astype(np.uint8) * 255, connectivity=8)
+        # Foreground must be a single connected component
+        assert num_labels - 1 == 1, f"{asset_name} foreground should be single connected component, got {num_labels - 1}"
+        # Total transparent pixels must include both perimeter and internal cavity
+        assert np.sum(alpha == 0) > 600, f"{asset_name} should have transparent pixels including cavity"
 
 

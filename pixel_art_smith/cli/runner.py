@@ -39,12 +39,14 @@ CLI Usage & AI Agent Guide:
        {scale}x/{stem}_metadata.json
    - Automatically omits GIFs and frame subfolders if a 1-frame canvas asset is detected.
 
-Deliverable Control Flags:
+Deliverable & Cavity Control Flags:
    --no-gifs   / --export-gifs   : Toggle animated GIF generation (e.g. omit for static items)
    --no-frames / --export-frames : Toggle motion frame extraction
    --no-sheet  / --export-sheet  : Toggle {stem}_pixel_sheet.png (when disabled, saves {stem}.png directly)
    --static                      : Shortcut for static 1-frame assets (--no-gifs --no-frames --no-sheet -g canvas)
    --export-1x / --no-export-1x  : Toggle 1x native resolution deliverables
+   --resolve-cavities / --no-cavities : Toggle enclosed background cavity resolution (e.g. ring holes, necklace loops)
+   --max-cavity-area             : Maximum pixel area for an enclosed cavity to be made transparent (default: None for items, 40 for sheets)
 
 Machine-Readable Guide:
    Run with '--agent-guide' to output full JSON schema for AI agents / automated pipelines.
@@ -98,7 +100,7 @@ AGENT_GUIDE = {
                     "{scale}x/{stem}_metadata.json",
                 ],
             },
-            "recommended_flags": ["--static", "--no-gifs", "--no-frames", "--no-sheet"],
+            "recommended_flags": ["--static", "--no-gifs", "--no-frames", "--no-sheet", "--resolve-cavities"],
         },
     },
     "flags": {
@@ -107,6 +109,8 @@ AGENT_GUIDE = {
         "--no-sheet / --export-sheet": "Toggle {stem}_pixel_sheet.png (default: False for 1-frame static assets, True for multi-frame sheets).",
         "--static": "Convenience shortcut for static 1-frame assets (equivalent to -g canvas --no-gifs --no-frames --no-sheet).",
         "--export-1x / --no-export-1x": "Toggle exporting 1x native resolution deliverables (default: True).",
+        "--resolve-cavities / --no-cavities": "Toggle enclosed background cavity resolution (e.g. ring holes, necklace loops). Default: True for 1-frame static assets/canvas, False for multi-frame sheets.",
+        "--max-cavity-area": "Maximum pixel area for an enclosed cavity to be made transparent (default: None for items/canvas, 40 for character sheets).",
         "--scale": "Integer upscale factor (e.g. 4 for 4x display, default: 4).",
         "--pitch": "Pixel block pitch in source image (0 for auto, 8 for 32px sprites, 4 for 64px RPG).",
         "--grid-mode": "Layout mode: 'auto-fit', 'fixed-32', 'canvas', etc.",
@@ -121,6 +125,10 @@ AGENT_GUIDE = {
         {
             "type": "1-Motion 1-Frame / Static Asset (Item, Icon, Prop, No GIFs)",
             "command": "python -m pixel_art_smith.cli.runner input_item.png -o ./output --static -s 4",
+        },
+        {
+            "type": "Item with Hollow Enclosed Space (Ring, Necklace)",
+            "command": "python -m pixel_art_smith.cli.runner ring.png -o ./output --static --resolve-cavities -s 4",
         },
     ],
 }
@@ -206,6 +214,8 @@ def process_single_image(
     expected_rows: int | None = None,
     expected_cols: int | None = None,
     export_sheet: bool | None = None,
+    resolve_cavities: bool | None = None,
+    max_cavity_area: int | None = None,
 ) -> dict:
     """Execute Snapper-Parity True-Grid post-processing pipeline on a sprite sheet or image."""
     print(f"\n[INFO] Processing: {input_path.name}")
@@ -227,8 +237,40 @@ def process_single_image(
 
     # 2. Strict Non-Leaking Spatial Background Segmentation with Enclosed Cavity Resolution (EBCR)
     if remove_bg:
-        print("  [2/4] Detecting background perimeter and resolving enclosed cavities (hair loops/limb gaps)...")
-        bg_mask, fg_mask, resolved_cavities = BackgroundRemover.segment_background_with_cavity_resolution(grid_arr)
+        force_canvas = grid_mode.lower() in ("canvas", "single", "snapper", "snapper-canvas", "static")
+        if resolve_cavities is None:
+            if force_canvas:
+                eff_resolve_cavities = True
+                eff_max_cavity_area = max_cavity_area
+            else:
+                # Fast preliminary check to detect if asset is a single item or multi-motion sheet
+                temp_bg, temp_fg, _ = BackgroundRemover.segment_background_with_cavity_resolution(
+                    grid_arr, resolve_cavities=False
+                )
+                temp_rgba = np.zeros((target_h, target_w, 4), dtype=np.uint8)
+                temp_rgba[temp_fg, 3] = 255
+                prelim_img = Image.fromarray(temp_rgba, "RGBA")
+                det_mode, _, _ = SpriteIsolator.detect_matrix_layout(prelim_img)
+                if det_mode != "sheet":
+                    eff_resolve_cavities = True
+                    eff_max_cavity_area = max_cavity_area
+                else:
+                    eff_resolve_cavities = False
+                    eff_max_cavity_area = max_cavity_area if max_cavity_area is not None else 40
+        else:
+            eff_resolve_cavities = resolve_cavities
+            eff_max_cavity_area = max_cavity_area
+
+        if eff_resolve_cavities:
+            print("  [2/4] Detecting background perimeter and resolving enclosed cavities (holes/loops)...")
+        else:
+            print("  [2/4] Detecting background perimeter (strict non-leaking outer floodfill)...")
+
+        bg_mask, fg_mask, resolved_cavities = BackgroundRemover.segment_background_with_cavity_resolution(
+            grid_arr,
+            resolve_cavities=eff_resolve_cavities,
+            max_cavity_area=eff_max_cavity_area,
+        )
         if resolved_cavities > 0:
             print(f"        Resolved {resolved_cavities} trapped background cavity pixel(s).")
     else:
@@ -569,6 +611,24 @@ def main_cli(args: list[str] | None = None) -> int:
         help="Frame duration in ms for animated GIFs (default: 150ms).",
     )
     parser.add_argument(
+        "--resolve-cavities",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Resolve enclosed background cavities (e.g. ring holes, necklace loops). Default: True for single items/canvas, False for multi-frame sheets.",
+    )
+    parser.add_argument(
+        "--no-cavities",
+        dest="resolve_cavities",
+        action="store_false",
+        help="Disable enclosed cavity resolution (preserves internal background-colored areas as foreground).",
+    )
+    parser.add_argument(
+        "--max-cavity-area",
+        type=int,
+        default=None,
+        help="Maximum pixel area for an enclosed cavity to be made transparent (default: None for items/canvas, 40 for character sheets).",
+    )
+    parser.add_argument(
         "--export-1x",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -658,6 +718,8 @@ def main_cli(args: list[str] | None = None) -> int:
                 gif_duration=parsed.gif_duration,
                 export_1x=parsed.export_1x,
                 export_sheet=export_sheet,
+                resolve_cavities=parsed.resolve_cavities,
+                max_cavity_area=parsed.max_cavity_area,
             )
             if res.get("status") == "success":
                 success_count += 1

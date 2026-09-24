@@ -235,16 +235,28 @@ class PixelArtSmithApp:
 
         # Toggles
         self.var_remove_bg = tk.BooleanVar(value=True)
+        self.var_resolve_cavities = tk.BooleanVar(value=True)
         self.var_clean = tk.BooleanVar(value=True)
 
         if GUI_BACKEND == "customtkinter":
             self.chk_bg = ctk.CTkCheckBox(self.sidebar, text="AI Background Removal", variable=self.var_remove_bg)
+            self.chk_cavity = ctk.CTkCheckBox(
+                self.sidebar, text="Resolve Cavities (Holes/Rings)", variable=self.var_resolve_cavities
+            )
             self.chk_clean = ctk.CTkCheckBox(self.sidebar, text="Clean 1px Noise / Orphans", variable=self.var_clean)
         else:
             self.chk_bg = tk.Checkbutton(
                 self.sidebar,
                 text="AI Background Removal",
                 variable=self.var_remove_bg,
+                bg="#242424",
+                fg="white",
+                selectcolor="#444",
+            )
+            self.chk_cavity = tk.Checkbutton(
+                self.sidebar,
+                text="Resolve Cavities (Holes/Rings)",
+                variable=self.var_resolve_cavities,
                 bg="#242424",
                 fg="white",
                 selectcolor="#444",
@@ -259,6 +271,7 @@ class PixelArtSmithApp:
             )
 
         self.chk_bg.pack(padx=15, pady=4, anchor="w")
+        self.chk_cavity.pack(padx=15, pady=4, anchor="w")
         self.chk_clean.pack(padx=15, pady=4, anchor="w")
 
         # Action Buttons
@@ -481,6 +494,7 @@ class PixelArtSmithApp:
                 scale_str = self.var_scale.get()
                 scale = int(scale_str[0]) if scale_str[0].isdigit() else 4
                 remove_bg = self.var_remove_bg.get()
+                resolve_cavities = self.var_resolve_cavities.get()
                 clean_orphans = self.var_clean.get()
                 max_colors = self.var_max_colors.get()
                 pitch = self._get_pitch_from_res_preset()
@@ -495,7 +509,10 @@ class PixelArtSmithApp:
 
                 # 2. Background segmentation with cavity resolution
                 if remove_bg:
-                    bg_mask, fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(grid_arr)
+                    bg_mask, fg_mask, _ = BackgroundRemover.segment_background_with_cavity_resolution(
+                        grid_arr,
+                        resolve_cavities=resolve_cavities,
+                    )
                 else:
                     bg_mask = np.zeros((target_h, target_w), dtype=bool)
                     fg_mask = np.ones((target_h, target_w), dtype=bool)
