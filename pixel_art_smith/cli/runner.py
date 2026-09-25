@@ -640,6 +640,11 @@ def main_cli(args: list[str] | None = None) -> int:
         default="result.md",
         help="Output Markdown audit report filename (default: result.md).",
     )
+    parser.add_argument(
+        "--organize-native",
+        action="store_true",
+        help="Copy source resource files into 'native/' folder and generate metadata readme.md.",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -741,6 +746,29 @@ def main_cli(args: list[str] | None = None) -> int:
         print(
             f" Total: {len(audit_metrics)} | Passed: {sum(1 for m in audit_metrics if 'PASS' in m.verdict)} | Pass Rate: 100.0%"
         )
+
+        # Generate 1x, 4x, and native folder metadata README files
+        if (output_dir / "1x").is_dir():
+            readme_1x = QualityAuditor.generate_folder_readme_1x(output_dir, audit_metrics)
+            print(f" 📄 Generated 1x Metadata Documentation: {readme_1x}")
+        if (output_dir / "4x").is_dir():
+            readme_4x = QualityAuditor.generate_folder_readme_4x(output_dir, audit_metrics)
+            print(f" 📄 Generated 4x Metadata Documentation: {readme_4x}")
+
+        if parsed.organize_native:
+            import shutil
+
+            native_dir = output_dir / "native"
+            native_dir.mkdir(parents=True, exist_ok=True)
+            for img_p in image_files:
+                dest_p = native_dir / img_p.name
+                if not dest_p.exists():
+                    shutil.copy2(img_p, dest_p)
+            readme_nat = QualityAuditor.generate_folder_readme_native(native_dir)
+            print(f" 📄 Generated native/ Metadata Documentation: {readme_nat}")
+        elif (output_dir / "native").is_dir():
+            readme_nat = QualityAuditor.generate_folder_readme_native(output_dir / "native")
+            print(f" 📄 Generated native/ Metadata Documentation: {readme_nat}")
 
     if len(image_files) > 0 and success_count == len(image_files):
         print("\n[SUCCESS] All processing completed successfully!")
